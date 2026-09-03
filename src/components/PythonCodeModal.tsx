@@ -30,51 +30,202 @@ const PROJECT_FILES: CodeFile[] = [
     folder: '根目录',
     path: 'main.py',
     filename: 'main.py',
-    description: '程序主入口：启动后台 FastAPI 网关线程并唤起 PySide6 悬浮窗 GUI',
+    description: '程序主入口：启动后台 FastAPI 网关，初始化系统托盘图标 (QSystemTrayIcon) 与悬浮窗',
     content: `"""
 UsageGateway - 跨平台 AI 网关与实时桌面悬浮胶囊监控
 运行环境: Python 3.10+
 支持系统: macOS (Apple Silicon/Intel) & Windows 10/11
+特性:
+1. 后台多线程自动化 Uvicorn FastAPI 网关;
+2. 系统常驻托盘 (System Tray Icon) 支持一键显隐、打开网页控制台与安全退出;
+3. 桌面无边框置顶悬浮窗 (支持拖拽、右键快捷菜单、双击切换形态);
+4. 优雅退出信号机制 (SIGINT / 托盘退出联动清理)。
 """
 
 import sys
+import os
+import signal
 import threading
 import uvicorn
 import platform
-from PySide6.QtWidgets import QApplication
+import webbrowser
+from PySide6.QtWidgets import (
+    QApplication, QSystemTrayIcon, QMenu, QMessageBox
+)
+from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QPen, QAction
+from PySide6.QtCore import Qt, QRectF
 
 from gateway.proxy import app as gateway_app
 from ui.widget import GatewayFloatingWidget
 from config import GATEWAY_HOST, GATEWAY_PORT
 
-def run_gateway_server():
-    """在后台独立守护线程中启动 FastAPI 网关"""
-    uvicorn.run(
-        gateway_app,
-        host=GATEWAY_HOST,
-        port=GATEWAY_PORT,
-        log_level="warning"
-    )
+class GatewayAppServer:
+    """网关后台服务管理器"""
+    def __init__(self, host=GATEWAY_HOST, port=GATEWAY_PORT):
+        self.host = host
+        self.port = port
+        self.server = None
+        self.thread = None
+
+    def start(self):
+        config = uvicorn.Config(
+            gateway_app,
+            host=self.host,
+            port=self.port,
+            log_level="warning",
+            loop="asyncio"
+        )
+        self.server = uvicorn.Server(config)
+        self.thread = threading.Thread(target=self.server.run, daemon=True)
+        self.thread.start()
+        print(f"[Gateway] 代理网关已就绪: http://{self.host}:{self.port}")
+
+    def stop(self):
+        if self.server:
+            self.server.should_exit = True
+            print("[Gateway] 网关服务正在安全停止...")
+
+def create_default_tray_icon() -> QIcon:
+    """动态生成清晰精美的暗夜翠绿雷电指示灯托盘矢量图标，免除对本地外部图片文件的硬依赖"""
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    # 1. 绘制暗黑圆底
+    painter.setBrush(QBrush(QColor(17, 24, 39)))
+    painter.setPen(QPen(QColor(74, 222, 128), 3))
+    painter.drawRoundedRect(QRectF(4, 4, 56, 56), 16, 16)
+
+    # 2. 绘制翠绿核心指示灯
+    painter.setBrush(QBrush(QColor(34, 197, 94)))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawEllipse(QRectF(22, 22, 20, 20))
+
+    # 3. 绘制中心微光
+    painter.setBrush(QBrush(QColor(220, 252, 231)))
+    painter.drawEllipse(QRectF(27, 27, 10, 10))
+    painter.end()
+
+    return QIcon(pixmap)
+
+class SystemTrayManager:
+    """系统托盘管理器：负责托盘图标、右键菜单交互及退出生命周期"""
+    def __init__(self, app: QApplication, widget: GatewayFloatingWidget, gateway_server: GatewayAppServer):
+        self.app = app
+        self.widget = widget
+        self.gateway_server = gateway_server
+        self.tray_icon = QSystemTrayIcon()
+        self.init_tray()
+
+    def init_tray(self):
+        # 1. 设置托盘图标与提示
+        self.tray_icon.setIcon(create_default_tray_icon())
+        self.tray_icon.setToolTip(f"AI 用量网关 (127.0.0.1:{GATEWAY_PORT}) - 运行中")
+
+        # 2. 创建托盘右键菜单
+        menu = QMenu()
+
+        # 状态指示项 (只读)
+        status_action = QAction(f"🟢 网关状态: 运行中 ({GATEWAY_PORT})", menu)
+        status_action.setEnabled(False)
+        menu.addAction(status_action)
+        menu.addSeparator()
+
+        # 显隐控制
+        self.toggle_action = QAction("👁️ 显示/隐藏 悬浮胶囊", menu)
+        self.toggle_action.triggered.connect(self.toggle_widget)
+        menu.addAction(self.toggle_action)
+
+        # 形态切换子菜单
+        mode_menu = menu.addMenu("🔄 切换显示形态")
+        act_capsule = QAction("长条胶囊 (Capsule)", mode_menu)
+        act_capsule.triggered.connect(lambda: self.widget.set_mode("capsule"))
+        act_circle = QAction("微型圆标 (Orb)", mode_menu)
+        act_circle.triggered.connect(lambda: self.widget.set_mode("circle"))
+        act_expand = QAction("分析大屏 (Dashboard)", mode_menu)
+        act_expand.triggered.connect(lambda: self.widget.set_mode("expanded"))
+        mode_menu.addAction(act_capsule)
+        mode_menu.addAction(act_circle)
+        mode_menu.addAction(act_expand)
+
+        # 重置位置
+        reset_action = QAction("🎯 重置悬浮窗位置 (右上角)", menu)
+        reset_action.triggered.connect(self.widget.reset_position)
+        menu.addAction(reset_action)
+
+        # 打开网页控制台
+        web_action = QAction("🌐 打开 Web 全量分析看板", menu)
+        web_action.triggered.connect(lambda: webbrowser.open(f"http://{GATEWAY_HOST}:{GATEWAY_PORT}"))
+        menu.addAction(web_action)
+
+        menu.addSeparator()
+
+        # 退出应用 (核心功能)
+        quit_action = QAction("🚪 退出 UsageGateway", menu)
+        quit_action.triggered.connect(self.quit_application)
+        menu.addAction(quit_action)
+
+        self.tray_icon.setContextMenu(menu)
+
+        # 3. 托盘左键点击/双击响应
+        self.tray_icon.activated.connect(self.on_tray_activated)
+        self.tray_icon.show()
+
+        # 4. 弹出系统启动气泡通知
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray_icon.showMessage(
+                "AI 网关已启动",
+                f"已在 127.0.0.1:{GATEWAY_PORT} 运行，可通过托盘图标或悬浮窗右键随时管理/退出。",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000
+            )
+
+    def toggle_widget(self):
+        if self.widget.isVisible():
+            self.widget.hide()
+        else:
+            self.widget.show()
+            self.widget.activateWindow()
+
+    def on_tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
+            self.toggle_widget()
+
+    def quit_application(self):
+        """安全停止网关并退出整个 Qt 应用程序"""
+        print("[App] 用户请求退出，正在释放资源...")
+        self.gateway_server.stop()
+        self.widget.close()
+        self.tray_icon.hide()
+        self.app.quit()
 
 def main():
-    # 1. 启动后台网关守护线程
-    server_thread = threading.Thread(target=run_gateway_server, daemon=True)
-    server_thread.start()
-    print(f"[Gateway] 代理网关已在后台就绪: http://{GATEWAY_HOST}:{GATEWAY_PORT}")
-
-    # 2. 启动 PySide6 前端悬浮窗应用
     # 解决高分屏 (HiDPI) 缩放模糊
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         QApplication.highDpiScaleFactorRoundingPolicy().PassThrough
     )
     qt_app = QApplication(sys.argv)
     qt_app.setApplicationName("UsageGateway")
+    qt_app.setQuitOnLastWindowClosed(False)  # 关键：窗口隐藏后依然常驻托盘，不意外退出
 
-    # 3. 创建悬浮胶囊并显示
+    # 1. 启动后台网关
+    server = GatewayAppServer()
+    server.start()
+
+    # 2. 创建悬浮胶囊主界面
     widget = GatewayFloatingWidget(port=GATEWAY_PORT)
     widget.show()
 
-    print("[UI] 桌面悬浮胶囊已启动 (单击微调/双击切换面板/长按拖动)")
+    # 3. 初始化系统托盘图标
+    tray_manager = SystemTrayManager(qt_app, widget, server)
+    widget.set_tray_manager(tray_manager)
+
+    # 4. 捕获 Ctrl+C 信号优雅退出
+    signal.signal(signal.SIGINT, lambda *args: tray_manager.quit_application())
+
+    print("[UI] 桌面悬浮胶囊与系统托盘已就绪 (右键悬浮窗或托盘图标可退出)")
     sys.exit(qt_app.exec())
 
 if __name__ == "__main__":
@@ -273,54 +424,149 @@ class UsageTracker:
 PySide6 悬浮胶囊窗组件 (ui/widget.py)
 特性:
 1. 跨平台支持: 适配 macOS (无 Dock 栏阴影/WA_MacAlwaysShowToolWindow) 与 Windows (Frameless/ToolWindow);
-2. 纯代码自绘矢量图形: 包含微型命中率圆环、截断标题、Token 与计费胶囊;
-3. 零延迟贴手平滑拖拽与边界防护.
+2. 纯代码自绘矢量图形: 包含微型命中率圆环、截断标题、Token、请求数与计费胶囊;
+3. 零延迟贴手平滑拖拽与边界防护;
+4. 完备的悬浮窗右键快捷菜单 (形态切换/置顶设置/打开 Web 看板/退出程序).
 """
 
 import platform
+import webbrowser
 from PySide6.QtCore import Qt, QPoint, QRectF, QTimer
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont
-from PySide6.QtWidgets import QWidget
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QAction, QGuiApplication
+from PySide6.QtWidgets import QWidget, QMenu
 
 class GatewayFloatingWidget(QWidget):
     def __init__(self, port: int = 8088):
         super().__init__()
         self.port = port
         self.mode = "capsule"  # "circle" | "capsule" | "expanded"
+        self.tray_manager = None
+        self.always_on_top = True
         
         # 界面状态
         self.session_title = "重构用量网关首会话截断标题..."
         self.cache_hit_rate = 76.7
         self.total_tokens = 152
+        self.requests_count = 1
         self.cost_cny = 0.012
         self.is_streaming = False
 
         # 1. 窗口属性设置: 置顶 + 无边框无干扰
-        flags = (
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.SubWindow
-        )
-        if platform.system() == "Darwin":
-            flags |= Qt.WindowType.WindowDoesNotAcceptFocus
-            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
-
-        self.setWindowFlags(flags)
+        self.apply_window_flags()
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
-        # 2. 尺寸与位置
+        # 2. 尺寸与初始位置 (智能定位在右上角安全区)
         self.drag_position = QPoint()
-        self.resize(340, 40)
-        self.move(200, 80)
+        self.resize(350, 42)
+        self.reset_position()
 
         # 3. 定时轮询本地网关状态
         self.poll_timer = QTimer(self)
         self.poll_timer.timeout.connect(self.fetch_latest_state)
         self.poll_timer.start(500)
 
+    def set_tray_manager(self, tray_manager):
+        self.tray_manager = tray_manager
+
+    def apply_window_flags(self):
+        flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.SubWindow
+        if self.always_on_top:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+            
+        if platform.system() == "Darwin":
+            flags |= Qt.WindowType.WindowDoesNotAcceptFocus
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow, True)
+
+        self.setWindowFlags(flags)
+
+    def reset_position(self):
+        """将悬浮窗智能重置到屏幕右上角安全区"""
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            top_margin = 40 if platform.system() == "Darwin" else 20
+            self.move(geo.right() - self.width() - 30, geo.top() + top_margin)
+        else:
+            self.move(200, 80)
+
     def fetch_latest_state(self):
         # 实际通过 requests.get(f"http://127.0.0.1:{self.port}/health") 刷新
         pass
+
+    def contextMenuEvent(self, event):
+        """悬浮窗右键菜单：即使没有注意托盘也能直接右键管理或退出"""
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #11141c;
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 8px;
+                padding: 6px;
+                color: #e2e8f0;
+                font-size: 12px;
+            }
+            QMenu::item {
+                padding: 6px 20px 6px 12px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #2563eb;
+                color: #ffffff;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: rgba(255, 255, 255, 0.1);
+                margin: 4px 6px;
+            }
+        """)
+
+        # 形态切换
+        mode_menu = menu.addMenu("🔄 切换形态")
+        m_capsule = QAction("长条胶囊 (Capsule)", mode_menu)
+        m_capsule.triggered.connect(lambda: self.set_mode("capsule"))
+        m_circle = QAction("微型圆标 (Orb)", mode_menu)
+        m_circle.triggered.connect(lambda: self.set_mode("circle"))
+        m_expand = QAction("全功能大屏 (Expanded)", mode_menu)
+        m_expand.triggered.connect(lambda: self.set_mode("expanded"))
+        mode_menu.addAction(m_capsule)
+        mode_menu.addAction(m_circle)
+        mode_menu.addAction(m_expand)
+
+        # 置顶切换
+        top_action = QAction("📌 保持窗口置顶" if not self.always_on_top else "✓ 保持窗口置顶", menu)
+        def toggle_top():
+            self.always_on_top = not self.always_on_top
+            self.apply_window_flags()
+            self.show()
+        top_action.triggered.connect(toggle_top)
+        menu.addAction(top_action)
+
+        # 重置位置
+        reset_act = QAction("🎯 重置到右上角", menu)
+        reset_act.triggered.connect(self.reset_position)
+        menu.addAction(reset_act)
+
+        # 打开 Web 分析控制台
+        web_act = QAction("🌐 打开 Web 控制台", menu)
+        web_act.triggered.connect(lambda: webbrowser.open(f"http://127.0.0.1:{self.port}"))
+        menu.addAction(web_act)
+
+        menu.addSeparator()
+
+        # 隐藏至托盘
+        hide_act = QAction("👁️ 隐藏到托盘", menu)
+        hide_act.triggered.connect(self.hide)
+        menu.addAction(hide_act)
+
+        # 退出应用
+        quit_act = QAction("🚪 退出 UsageGateway", menu)
+        if self.tray_manager:
+            quit_act.triggered.connect(self.tray_manager.quit_application)
+        else:
+            quit_act.triggered.connect(self.close)
+        menu.addAction(quit_act)
+
+        menu.exec(event.globalPos())
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -336,17 +582,27 @@ class GatewayFloatingWidget(QWidget):
             event.accept()
 
     def mouseDoubleClickEvent(self, event):
-        # 双击在圆形微标、长条胶囊与全功能大屏间平滑循环
-        modes = ["circle", "capsule", "expanded"]
-        next_idx = (modes.index(self.mode) + 1) % len(modes)
-        self.set_mode(modes[next_idx])
+        if event.button() == Qt.MouseButton.LeftButton:
+            # 双击在圆形微标、长条胶囊与全功能大屏间平滑循环
+            modes = ["circle", "capsule", "expanded"]
+            next_idx = (modes.index(self.mode) + 1) % len(modes)
+            self.set_mode(modes[next_idx])
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.set_mode("capsule" if self.mode == "expanded" else "circle")
+        elif event.modifiers() == Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_Q:
+            if self.tray_manager:
+                self.tray_manager.quit_application()
+            else:
+                self.close()
 
     def set_mode(self, mode: str):
         self.mode = mode
         if mode == "circle":
             self.resize(44, 44)
         elif mode == "capsule":
-            self.resize(340, 40)
+            self.resize(350, 42)
         elif mode == "expanded":
             self.resize(580, 490)
         self.update()
@@ -378,7 +634,7 @@ class GatewayFloatingWidget(QWidget):
             painter.drawRoundedRect(rect, radius, radius)
 
             # 左侧微型进度圆标
-            orb_rect = QRectF(rect.x() + 4, rect.y() + 4, 32, 32)
+            orb_rect = QRectF(rect.x() + 4, rect.y() + 4, 34, 34)
             green_pen = QPen(QColor(74, 222, 128), 2.5)
             painter.setPen(green_pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -389,23 +645,30 @@ class GatewayFloatingWidget(QWidget):
             painter.setPen(QColor(230, 235, 245))
             font = QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 9)
             painter.setFont(font)
-            title_rect = QRectF(rect.x() + 42, rect.y(), 160, rect.height())
-            painter.drawText(title_rect, Qt.AlignmentFlag.AlignVCenter, self.session_title[:14] + "...")
+            title_rect = QRectF(rect.x() + 44, rect.y(), 140, rect.height())
+            painter.drawText(title_rect, Qt.AlignmentFlag.AlignVCenter, self.session_title[:12] + "...")
 
             # 右侧 Token 药丸
-            badge_x = rect.x() + 210
+            badge_x = rect.x() + 190
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QBrush(QColor(28, 34, 46)))
-            painter.drawRoundedRect(QRectF(badge_x, rect.y() + 8, 56, 24), 12, 12)
+            painter.drawRoundedRect(QRectF(badge_x, rect.y() + 9, 48, 24), 12, 12)
             painter.setPen(QColor(180, 190, 205))
-            painter.drawText(QRectF(badge_x, rect.y() + 8, 56, 24), Qt.AlignmentFlag.AlignCenter, f"{self.total_tokens}tok")
+            painter.drawText(QRectF(badge_x, rect.y() + 9, 48, 24), Qt.AlignmentFlag.AlignCenter, f"{self.total_tokens}tok")
+
+            # 右侧 请求数 药丸
+            req_x = badge_x + 52
+            painter.setBrush(QBrush(QColor(30, 41, 59)))
+            painter.drawRoundedRect(QRectF(req_x, rect.y() + 9, 38, 24), 12, 12)
+            painter.setPen(QColor(148, 163, 184))
+            painter.drawText(QRectF(req_x, rect.y() + 9, 38, 24), Qt.AlignmentFlag.AlignCenter, f"✓{self.requests_count}")
 
             # 右侧 命中率 药丸
-            hit_x = badge_x + 62
+            hit_x = req_x + 42
             painter.setBrush(QBrush(QColor(16, 50, 36)))
-            painter.drawRoundedRect(QRectF(hit_x, rect.y() + 8, 58, 24), 12, 12)
+            painter.drawRoundedRect(QRectF(hit_x, rect.y() + 9, 58, 24), 12, 12)
             painter.setPen(QColor(74, 222, 128))
-            painter.drawText(QRectF(hit_x, rect.y() + 8, 58, 24), Qt.AlignmentFlag.AlignCenter, f"⚡{self.cache_hit_rate:.1f}%")
+            painter.drawText(QRectF(hit_x, rect.y() + 9, 58, 24), Qt.AlignmentFlag.AlignCenter, f"⚡{self.cache_hit_rate:.1f}%")
 `
   },
   {

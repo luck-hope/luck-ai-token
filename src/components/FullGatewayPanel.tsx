@@ -21,6 +21,8 @@ import {
   ArrowDown,
   Clock,
   Sparkles,
+  Copy,
+  Check,
 } from 'lucide-react';
 
 interface FullGatewayPanelProps {
@@ -45,7 +47,7 @@ interface FullGatewayPanelProps {
   customHeight?: number;
 }
 
-type SortField = 'none' | 'tokens' | 'hitRate' | 'requests';
+type SortField = 'none' | 'id' | 'tokens' | 'hitRate' | 'requests';
 type SortOrder = 'asc' | 'desc';
 
 export const FullGatewayPanel: React.FC<FullGatewayPanelProps> = ({
@@ -77,9 +79,18 @@ export const FullGatewayPanel: React.FC<FullGatewayPanelProps> = ({
   // 1. 日历处支持用户手动完全自由输入（非下拉框）
   const [inputDate, setInputDate] = useState<string>('2026-09-03');
 
-  // 2. 排序状态：支持按「总消耗」或「命中率」或「请求数」正反序排序
+  // 2. 排序状态：支持按「ID编号」「总消耗」「命中率」「请求数」正反序排序
   const [sortField, setSortField] = useState<SortField>('none');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+
+  // URL 复制成功反馈
+  const [isCopiedUrl, setIsCopiedUrl] = useState<boolean>(false);
+
+  const handleCopyIdeUrl = (url: string) => {
+    navigator.clipboard.writeText(url);
+    setIsCopiedUrl(true);
+    setTimeout(() => setIsCopiedUrl(false), 2200);
+  };
 
   // 列字段自定义筛选（默认展示请求数、总消耗、命中率、模型、任务标题）
   const [columns, setColumns] = useState<ColumnVisibility>({
@@ -95,6 +106,19 @@ export const FullGatewayPanel: React.FC<FullGatewayPanelProps> = ({
   // 分页状态 (每页 8 条)
   const pageSize = 8;
   const [page, setPage] = useState<number>(1);
+
+  // 切换 ID 编号排序
+  const handleSortId = () => {
+    if (sortField !== 'id') {
+      setSortField('id');
+      setSortOrder('asc'); // ID 默认从 1 到 N 升序
+    } else if (sortOrder === 'asc') {
+      setSortOrder('desc'); // 切换为 N 到 1 降序
+    } else {
+      setSortField('none');
+    }
+    setPage(1);
+  };
 
   // 切换总消耗排序
   const handleSortTokens = () => {
@@ -138,7 +162,9 @@ export const FullGatewayPanel: React.FC<FullGatewayPanelProps> = ({
   // 排序与筛选计算
   const sortedTasks = useMemo(() => {
     const list = [...tasks];
-    if (sortField === 'tokens') {
+    if (sortField === 'id') {
+      list.sort((a, b) => (sortOrder === 'desc' ? b.taskNum - a.taskNum : a.taskNum - b.taskNum));
+    } else if (sortField === 'tokens') {
       list.sort((a, b) => (sortOrder === 'desc' ? b.totalTokens - a.totalTokens : a.totalTokens - b.totalTokens));
     } else if (sortField === 'hitRate') {
       list.sort((a, b) => (sortOrder === 'desc' ? b.cacheHitRate - a.cacheHitRate : a.cacheHitRate - b.cacheHitRate));
@@ -150,7 +176,9 @@ export const FullGatewayPanel: React.FC<FullGatewayPanelProps> = ({
 
   const sortedSessions = useMemo(() => {
     const list = [...sessions];
-    if (sortField === 'tokens') {
+    if (sortField === 'id') {
+      list.sort((a, b) => (sortOrder === 'desc' ? b.sessionNum - a.sessionNum : a.sessionNum - b.sessionNum));
+    } else if (sortField === 'tokens') {
       list.sort((a, b) => (sortOrder === 'desc' ? b.totalTokens - a.totalTokens : a.totalTokens - b.totalTokens));
     } else if (sortField === 'hitRate') {
       list.sort((a, b) => (sortOrder === 'desc' ? b.cacheHitRate - a.cacheHitRate : a.cacheHitRate - b.cacheHitRate));
@@ -592,7 +620,31 @@ export const FullGatewayPanel: React.FC<FullGatewayPanelProps> = ({
           >
             <tr>
               <th className="py-2.5 px-2 text-center w-8">📌</th>
-              <th className="py-2.5 px-2.5 text-right w-10">#</th>
+
+              {/* 1. 会话/任务 ID 编号排序 */}
+              <th
+                onClick={handleSortId}
+                title="点击按会话/任务编号排序 (升序 / 降序)"
+                className={`py-2.5 px-2.5 text-right w-12 cursor-pointer select-none transition-colors group/sort ${
+                  sortField === 'id'
+                    ? 'text-sky-600 dark:text-sky-400 bg-sky-500/10'
+                    : 'hover:text-sky-600 dark:hover:text-sky-300'
+                }`}
+              >
+                <div className="inline-flex items-center justify-end gap-1">
+                  <span>#</span>
+                  {sortField === 'id' ? (
+                    sortOrder === 'asc' ? (
+                      <ArrowUp className="w-3.5 h-3.5 text-sky-600" />
+                    ) : (
+                      <ArrowDown className="w-3.5 h-3.5 text-sky-600" />
+                    )
+                  ) : (
+                    <ArrowUpDown className="w-3 h-3 opacity-40 group-hover/sort:opacity-100" />
+                  )}
+                </div>
+              </th>
+
               <th className="py-2.5 px-3 text-center">服务商</th>
 
               {/* 0. 请求数 / 有效请求数 */}
@@ -909,12 +961,31 @@ export const FullGatewayPanel: React.FC<FullGatewayPanelProps> = ({
           isDark ? 'bg-[#151922] border-zinc-800 text-zinc-400' : 'bg-[#f4f6f9] border-zinc-200 text-zinc-700 font-semibold'
         }`}
       >
-        <div className="flex items-center gap-2">
-          <span>
-            IDE 接入: <code className="font-mono font-bold text-emerald-600 dark:text-emerald-400">http://127.0.0.1:{port}/v1</code>
-          </span>
-          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-            · 支持按键 <kbd className="px-1 py-0.2 rounded text-[10px] font-mono font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">W/A/S/D</kbd> 或 <kbd className="px-1 py-0.2 rounded text-[10px] font-mono font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">↑↓←→</kbd> 滑动
+        <div className="flex items-center gap-1.5">
+          <span>接入:</span>
+          {/* 用户点击 URL 自动复制 */}
+          <button
+            type="button"
+            onClick={() => handleCopyIdeUrl(`http://127.0.0.1:${port}/v1`)}
+            title={isCopiedUrl ? '已复制到剪贴板' : '点击复制接入 URL 地址'}
+            className={`group inline-flex items-center gap-1.5 px-2 py-0.5 rounded font-mono font-bold transition-all border cursor-pointer select-none ${
+              isCopiedUrl
+                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-[0_0_8px_rgba(16,185,129,0.3)]'
+                : isDark
+                ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-400 border-emerald-800/50 hover:border-emerald-500/60'
+                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-300'
+            }`}
+          >
+            <span>http://127.0.0.1:{port}/v1</span>
+            {isCopiedUrl ? (
+              <Check className="w-3 h-3 text-emerald-400" />
+            ) : (
+              <Copy className="w-3 h-3 opacity-60 group-hover:opacity-100 transition-opacity" />
+            )}
+          </button>
+
+          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 ml-1">
+            · 支持按键滑动 <kbd className="px-1 py-0.2 rounded text-[10px] font-mono font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">W/A/S/D</kbd> <kbd className="px-1 py-0.2 rounded text-[10px] font-mono font-bold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700">↑↓←→</kbd>
           </span>
         </div>
 

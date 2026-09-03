@@ -89,4 +89,6 @@ export interface ProviderConfig {
   proxy?: string;
   modelRoutes: string; // e.g. "sensenova-*, mock-*"
   isActive: boolean;
+  isPreset?: boolean; // 官方预设服务商，锁定官方标准上游节点
+  description?: string;
 }

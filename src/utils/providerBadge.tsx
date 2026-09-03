@@ -7,7 +7,7 @@ export interface ProviderMeta {
   displayName: string;
 }
 
-// 1. DeepSeek 蓝鲸鱼 SVG 矢量图标 (100% 对应用户图1)
+// 1. DeepSeek 蓝鲸鱼 SVG 矢量图标 (100% 对应官方)
 export const DeepSeekIcon: React.FC<{ size?: number; className?: string }> = ({ size = 18, className = '' }) => (
   <svg
     width={size}
@@ -17,17 +17,15 @@ export const DeepSeekIcon: React.FC<{ size?: number; className?: string }> = ({ 
     xmlns="http://www.w3.org/2000/svg"
     className={`flex-shrink-0 ${className}`}
   >
-    {/* 蓝鲸鱼主体 */}
     <path
-      d="M31 10.5C29 8 26.5 7 23.5 6.8C24.2 5.8 25 4.8 26.2 4.2C26.7 3.9 26.5 3.1 25.8 3.1C23 3.3 20.8 4.8 19.3 6.6C16.2 7 13.2 8.2 10.7 10.3C6.3 13.8 3.8 18.9 3.6 24.5C3.5 26.7 4.2 28.7 5.7 29.9C7.4 31.1 9.6 31.3 12.3 30.7C16.6 29.7 20.4 27.3 23.8 24.2C27 21.3 29.9 17.6 31.2 13.5C31.7 12.3 31.7 11.3 31 10.5ZM21.9 22.2C19 24.8 15.6 26.8 11.8 27.6C9.9 28 8.4 27.9 7.4 27.1C6.6 26.4 6.2 25 6.3 23.3C6.6 18.8 8.8 14.6 12.6 11.7C14.7 10.1 17.2 9.1 19.8 8.9C18.6 10.8 18.3 13.2 18.7 15.3C19.2 17.3 20.4 19 21.9 20.2C22.1 20.9 22 21.6 21.9 22.2ZM28.5 12.9C27.3 16.6 24.8 19.7 21.8 22.1C21 20.9 20.4 19.5 20.1 17.9C19.9 16.4 20.1 14.7 20.9 13.3C22.1 11.3 24.1 9.9 26.5 9.4C27.7 10.3 28.3 11.5 28.5 12.9Z"
+      d="M31 10.5C29 8 26.5 7 23.5 6.8C24.2 5.8 25 4.8 26.2 4.2C26.7 3.9 26.5 3.1 25.8 3.1C23 3.3 20.8 4.8 19.3 6.6C16.2 7 13.2 8.2 10.7 10.3C6.3 13.8 3.8 18.9 3.6 24.5C3.5 26.7 4.2 28.7 5.7 29.9C7.4 31.1 9.6 31.3 12.3 30.7C16.6 29.7 20.4 27.3 23.8 24.2C27 21.3 29.9 17.6 31.2 13.5C31.7 12.3 31.7 11.3 31 10.5ZM21.9 22.2C19 24.8 15.6 26.8 11.8 27.6C9.9 28 8.4 27.9 7.4 27.1C6.6 28.8 8.8 14.6 12.6 11.7C14.7 10.1 17.2 9.1 19.8 8.9C18.6 10.8 18.3 13.2 18.7 15.3C19.2 17.3 20.4 19 21.9 20.2C22.1 20.9 22 21.6 21.9 22.2ZM28.5 12.9C27.3 16.6 24.8 19.7 21.8 22.1C21 20.9 20.4 19.5 20.1 17.9C19.9 16.4 20.1 14.7 20.9 13.3C22.1 11.3 24.1 9.9 26.5 9.4C27.7 10.3 28.3 11.5 28.5 12.9Z"
       fill="#2955fb"
     />
-    {/* 鲸鱼眼睛 */}
     <circle cx="10.8" cy="17.8" r="1.6" fill="#2955fb" />
   </svg>
 );
 
-// 2. OpenAI 经典六瓣螺旋旋涡 SVG 图标 (100% 对应用户图2)
+// 2. OpenAI 经典六瓣螺旋旋涡 SVG 图标
 export const OpenAIIcon: React.FC<{ size?: number; className?: string }> = ({ size = 18, className = '' }) => (
   <svg
     width={size}
@@ -41,7 +39,7 @@ export const OpenAIIcon: React.FC<{ size?: number; className?: string }> = ({ si
   </svg>
 );
 
-// 3. 商汤 TokenPlan (SenseNova) 官方几何四宫格条纹矩阵 (100% 对应用户图3)
+// 3. 商汤 TokenPlan (SenseNova) 官方几何四宫格条纹矩阵
 export const SenseNovaTokenPlanIcon: React.FC<{ size?: number; className?: string }> = ({ size = 18, className = '' }) => (
   <svg
     width={size}
@@ -56,17 +54,11 @@ export const SenseNovaTokenPlanIcon: React.FC<{ size?: number; className?: strin
         <line x1="0" y1="0" x2="0" y2="4" stroke="#00f5c4" strokeWidth="1.8" />
       </pattern>
     </defs>
-    {/* 1. 左上大紫底色块 */}
     <rect x="2" y="2" width="20" height="20" rx="1.5" fill="#583be8" />
-    {/* 2. 左上角内嵌 45 度亮青绿条纹斜线 */}
     <rect x="7" y="7" width="15" height="15" fill="url(#senseNovaPattern)" />
-    {/* 3. 中心纯白正方留白核心 */}
     <rect x="12" y="12" width="10" height="10" rx="0.5" fill="#ffffff" />
-    {/* 4. 右上亮青绿小方块 */}
     <rect x="22" y="12" width="10" height="10" rx="1" fill="#00e5b7" />
-    {/* 5. 左下亮青绿小方块 */}
     <rect x="12" y="22" width="10" height="10" rx="1" fill="#00e5b7" />
-    {/* 6. 右下深紫小方块 */}
     <rect x="22" y="22" width="10" height="10" rx="1" fill="#4d30df" />
   </svg>
 );
@@ -108,6 +100,88 @@ export const AnthropicClaudeIcon: React.FC<{ size?: number; className?: string }
   </svg>
 );
 
+// 6. Google Gemini 四芒星光渐变矢量图标
+export const GeminiIcon: React.FC<{ size?: number; className?: string }> = ({ size = 18, className = '' }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={`flex-shrink-0 ${className}`}
+  >
+    <path
+      d="M12 2C12 7.52285 7.52285 12 2 12C7.52285 12 12 16.4772 12 22C12 16.4772 16.4772 12 22 12C16.4772 12 12 7.52285 12 2Z"
+      fill="url(#geminiGradient)"
+    />
+    <defs>
+      <linearGradient id="geminiGradient" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#1BA1E3" />
+        <stop offset="0.5" stopColor="#5B7CEF" />
+        <stop offset="1" stopColor="#9C66F9" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+// 7. 硅基流动 SiliconFlow 图标
+export const SiliconFlowIcon: React.FC<{ size?: number; className?: string }> = ({ size = 18, className = '' }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={`flex-shrink-0 ${className}`}
+  >
+    <rect width="24" height="24" rx="5" fill="#7C3AED" />
+    <path
+      d="M6 12C6 8.68629 8.68629 6 12 6C15.3137 6 18 8.68629 18 12C18 15.3137 15.3137 18 12 18"
+      stroke="#ffffff"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+    />
+    <circle cx="12" cy="12" r="2.5" fill="#38BDF8" />
+  </svg>
+);
+
+// 8. Ollama 标志性骆马/羊驼图标
+export const OllamaIcon: React.FC<{ size?: number; className?: string }> = ({ size = 18, className = '' }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={`flex-shrink-0 ${className}`}
+  >
+    <rect width="24" height="24" rx="5" fill="#18181B" stroke="#3F3F46" strokeWidth="1" />
+    <circle cx="12" cy="12" r="5" fill="#FAFAFA" />
+    <circle cx="10" cy="11" r="1" fill="#18181B" />
+    <circle cx="14" cy="11" r="1" fill="#18181B" />
+  </svg>
+);
+
+// 9. 自定义/通用服务商图标 (亮蓝齿轮核心)
+export const CustomServerIcon: React.FC<{ size?: number; className?: string }> = ({ size = 18, className = '' }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    className={`flex-shrink-0 ${className}`}
+  >
+    <rect width="24" height="24" rx="5" fill="#0284C7" />
+    <path
+      d="M12 8V16M8 12H16M7 7L17 17M17 7L7 17"
+      stroke="#ffffff"
+      strokeWidth="2"
+      strokeLinecap="round"
+    />
+  </svg>
+);
+
 export function getProviderMeta(provider: string): ProviderMeta {
   const p = (provider || '').toLowerCase();
   if (p.includes('deepseek')) {
@@ -115,7 +189,7 @@ export function getProviderMeta(provider: string): ProviderMeta {
       color: '#2955fb',
       badgeBg: 'rgba(41, 85, 251, 0.12)',
       badgeBorder: 'rgba(41, 85, 251, 0.35)',
-      displayName: 'DeepSeek',
+      displayName: 'DeepSeek (深度求索)',
     };
   }
   if (p.includes('sensenova') || p.includes('tokenplan') || p.includes('商汤')) {
@@ -123,7 +197,7 @@ export function getProviderMeta(provider: string): ProviderMeta {
       color: '#583be8',
       badgeBg: 'rgba(88, 59, 232, 0.12)',
       badgeBorder: 'rgba(88, 59, 232, 0.35)',
-      displayName: '商汤 TokenPlan (SenseNova)',
+      displayName: '商汤 SenseNova (日日新)',
     };
   }
   if (p.includes('openai') || p.includes('gpt') || p.includes('o1') || p.includes('o3')) {
@@ -131,7 +205,7 @@ export function getProviderMeta(provider: string): ProviderMeta {
       color: '#10a37f',
       badgeBg: 'rgba(16, 163, 127, 0.12)',
       badgeBorder: 'rgba(16, 163, 127, 0.35)',
-      displayName: 'OpenAI',
+      displayName: 'OpenAI 官方',
     };
   }
   if (p.includes('bigmodel') || p.includes('glm') || p.includes('智谱')) {
@@ -139,7 +213,7 @@ export function getProviderMeta(provider: string): ProviderMeta {
       color: '#3E63DD',
       badgeBg: 'rgba(62, 99, 221, 0.12)',
       badgeBorder: 'rgba(62, 99, 221, 0.35)',
-      displayName: '智谱 GLM',
+      displayName: '智谱 GLM (BigModel)',
     };
   }
   if (p.includes('anthropic') || p.includes('claude')) {
@@ -150,17 +224,64 @@ export function getProviderMeta(provider: string): ProviderMeta {
       displayName: 'Anthropic Claude',
     };
   }
+  if (p.includes('gemini') || p.includes('google')) {
+    return {
+      color: '#1BA1E3',
+      badgeBg: 'rgba(27, 161, 227, 0.12)',
+      badgeBorder: 'rgba(27, 161, 227, 0.35)',
+      displayName: 'Google Gemini',
+    };
+  }
+  if (p.includes('silicon') || p.includes('硅基')) {
+    return {
+      color: '#7C3AED',
+      badgeBg: 'rgba(124, 58, 237, 0.12)',
+      badgeBorder: 'rgba(124, 58, 237, 0.35)',
+      displayName: 'SiliconFlow (硅基流动)',
+    };
+  }
+  if (p.includes('ollama') || p.includes('local') || p.includes('本地')) {
+    return {
+      color: '#71717A',
+      badgeBg: 'rgba(113, 113, 122, 0.12)',
+      badgeBorder: 'rgba(113, 113, 122, 0.35)',
+      displayName: 'Ollama 本地服务',
+    };
+  }
   return {
-    color: '#6366f1',
-    badgeBg: 'rgba(99, 102, 241, 0.12)',
-    badgeBorder: 'rgba(99, 102, 241, 0.35)',
-    displayName: provider || '通用模型',
+    color: '#0284C7',
+    badgeBg: 'rgba(2, 132, 199, 0.12)',
+    badgeBorder: 'rgba(2, 132, 199, 0.35)',
+    displayName: provider || '自定义服务商',
   };
 }
 
+export const ProviderIcon: React.FC<{ provider: string; size?: number; className?: string }> = ({
+  provider,
+  size = 18,
+  className = '',
+}) => {
+  const p = (provider || '').toLowerCase();
+  if (p.includes('deepseek')) return <DeepSeekIcon size={size} className={className} />;
+  if (p.includes('sensenova') || p.includes('tokenplan') || p.includes('商汤'))
+    return <SenseNovaTokenPlanIcon size={size} className={className} />;
+  if (p.includes('openai') || p.includes('gpt') || p.includes('o1') || p.includes('o3'))
+    return <OpenAIIcon size={size} className={className} />;
+  if (p.includes('bigmodel') || p.includes('glm') || p.includes('智谱'))
+    return <ZhipuGLMIcon size={size} className={className} />;
+  if (p.includes('anthropic') || p.includes('claude'))
+    return <AnthropicClaudeIcon size={size} className={className} />;
+  if (p.includes('gemini') || p.includes('google'))
+    return <GeminiIcon size={size} className={className} />;
+  if (p.includes('silicon') || p.includes('硅基'))
+    return <SiliconFlowIcon size={size} className={className} />;
+  if (p.includes('ollama') || p.includes('local') || p.includes('本地'))
+    return <OllamaIcon size={size} className={className} />;
+  return <CustomServerIcon size={size} className={className} />;
+};
+
 /**
- * 严格按照要求：不需要显示名称，仅显示纯高清图标！
- * 名称通过用户鼠标移入（Hover）时的浏览器原生 tooltip 或 title 浮层显示。
+ * 纯高清图标徽标组件，支持 Hover Tooltip
  */
 export const ProviderBadge: React.FC<{
   provider: string;
@@ -168,8 +289,6 @@ export const ProviderBadge: React.FC<{
   className?: string;
 }> = ({ provider, size = 'md', className = '' }) => {
   const meta = getProviderMeta(provider);
-  const p = (provider || '').toLowerCase();
-
   const px = size === 'sm' ? 16 : size === 'lg' ? 22 : 18;
   const containerClass =
     size === 'sm'
@@ -177,32 +296,6 @@ export const ProviderBadge: React.FC<{
       : size === 'lg'
       ? 'w-8 h-8 p-1 rounded-lg'
       : 'w-7 h-7 p-1 rounded-md';
-
-  const renderIcon = () => {
-    if (p.includes('deepseek')) {
-      return <DeepSeekIcon size={px} />;
-    }
-    if (p.includes('sensenova') || p.includes('tokenplan') || p.includes('商汤')) {
-      return <SenseNovaTokenPlanIcon size={px} />;
-    }
-    if (p.includes('openai') || p.includes('gpt') || p.includes('o1') || p.includes('o3')) {
-      return <OpenAIIcon size={px} />;
-    }
-    if (p.includes('bigmodel') || p.includes('glm') || p.includes('智谱')) {
-      return <ZhipuGLMIcon size={px} />;
-    }
-    if (p.includes('anthropic') || p.includes('claude')) {
-      return <AnthropicClaudeIcon size={px} />;
-    }
-    return (
-      <span
-        className="font-mono font-bold text-[10px]"
-        style={{ color: meta.color }}
-      >
-        {(provider.slice(0, 2) || 'AI').toUpperCase()}
-      </span>
-    );
-  };
 
   return (
     <div
@@ -213,7 +306,7 @@ export const ProviderBadge: React.FC<{
         borderColor: meta.badgeBorder,
       }}
     >
-      {renderIcon()}
+      <ProviderIcon provider={provider} size={px} />
     </div>
   );
 };

@@ -10,6 +10,8 @@ export const INITIAL_PROVIDERS: ProviderConfig[] = [
     proxy: 'http://127.0.0.1:7890',
     modelRoutes: 'gpt-4o, gpt-4o-mini, o1, o3-mini',
     isActive: true,
+    isPreset: true,
+    description: 'OpenAI 官方全球标准 API 接口',
   },
   {
     id: 'prov-deepseek',
@@ -20,6 +22,8 @@ export const INITIAL_PROVIDERS: ProviderConfig[] = [
     proxy: '',
     modelRoutes: 'deepseek-chat, deepseek-coder, deepseek-reasoner',
     isActive: true,
+    isPreset: true,
+    description: 'DeepSeek 官方低延迟高并发推理节点',
   },
   {
     id: 'prov-sensenova',
@@ -30,6 +34,8 @@ export const INITIAL_PROVIDERS: ProviderConfig[] = [
     proxy: '',
     modelRoutes: 'sensenova-*, nova-*',
     isActive: true,
+    isPreset: true,
+    description: '商汤 SenseNova TokenPlan 企业级推理接口',
   },
   {
     id: 'prov-bigmodel',
@@ -40,6 +46,8 @@ export const INITIAL_PROVIDERS: ProviderConfig[] = [
     proxy: '',
     modelRoutes: 'glm-*, codegeex-*',
     isActive: true,
+    isPreset: true,
+    description: '智谱 AI 开放平台开放 PaaS 节点',
   },
 ];
 

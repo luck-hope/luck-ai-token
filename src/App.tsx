@@ -72,11 +72,26 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [streamProgressText, setStreamProgressText] = useState<string>('');
 
+  const handleResetDefaultSessions = () => {
+    setSessions(INITIAL_SESSIONS);
+    setTasks(INITIAL_TASKS);
+    setTrackingTarget({ type: 'turn', id: INITIAL_TASKS[0]?.id || '', isAuto: true });
+  };
+
+  const handleClearAllSessions = () => {
+    setSessions([]);
+    setTasks([]);
+    setTrackingTarget({ type: 'turn', id: '', isAuto: true });
+    setDetailItem(null);
+  };
+
   // Aggregated metrics
   const totalRequests = tasks.reduce((acc, t) => acc + t.requestCount, 0);
   const totalSessions = sessions.length;
   const overallCacheHitRate =
-    tasks.reduce((acc, t) => acc + t.cacheHitRate, 0) / (tasks.length || 1);
+    tasks.length > 0
+      ? tasks.reduce((acc, t) => acc + t.cacheHitRate, 0) / tasks.length
+      : 0;
 
   // Compute active task for capsule display
   const activeTask: TaskItem = (() => {
@@ -84,12 +99,48 @@ export default function App() {
       const found = tasks.find((t) => t.id === trackingTarget.id);
       if (found) return found;
     }
-    return tasks[0] || INITIAL_TASKS[0];
+    return tasks[0] || {
+      id: 'empty',
+      taskNum: 0,
+      name: '暂无活跃请求',
+      sessionId: 'none',
+      sessionNum: 0,
+      requestCount: 0,
+      successRequestCount: 0,
+      provider: 'openai',
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      cacheHitRate: 0,
+      cacheHitTokens: 0,
+      model: 'none',
+      costCny: 0,
+      savedCny: 0,
+      createdAt: '--:--',
+    };
   })();
 
   const activeSession: SessionItem = (() => {
     const matched = sessions.find((s) => s.id === activeTask.sessionId);
-    return matched || sessions[0] || INITIAL_SESSIONS[0];
+    return matched || sessions[0] || {
+      id: 'sess-empty',
+      sessionNum: 0,
+      taskCount: 0,
+      requestCount: 0,
+      successRequestCount: 0,
+      title: '暂无活跃会话',
+      provider: 'openai',
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      cacheHitRate: 0,
+      cacheHitTokens: 0,
+      model: 'none',
+      costCny: 0,
+      savedCny: 0,
+      createdAt: '--:--',
+      requests: [],
+    };
   })();
 
   // Navigation across tasks from capsule
@@ -434,6 +485,8 @@ export default function App() {
         onSaveProviders={setProviders}
         port={port}
         onUpdatePort={setPort}
+        onClearAllSessions={handleClearAllSessions}
+        onResetDefaultSessions={handleResetDefaultSessions}
       />
 
       <SessionDetailDrawer

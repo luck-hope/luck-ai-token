@@ -1,0 +1,6 @@
+{
+  "name": "AI Gateway Floating Capsule",
+  "description": "轻量级大模型用量网关悬浮胶囊与监控面板，支持圆形光标、椭圆摘要胶囊与完整面板三态无缝切换。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

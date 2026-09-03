@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   GitHub & 现代原生桌面工具顶级滚动条规范 (极细、无轨、悬浮显现、圆角防违和)
+   ========================================================================== */
+
+/* 1. 全局 Webkit 滚动条优化 (针对 Chrome, Safari, Electron, VS Code, Edge) */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.28);
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 2. 深色夜间模式滚动条 */
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
+}
+
+/* 3. 浅色白天模式滚动条 (避免 Windows 原生厚重白底大灰块) */
+::-webkit-scrollbar-thumb:window-inactive {
+  background: transparent;
+}
+
+/* 4. Firefox 标准滚动条支持 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.3) transparent;
+}
+
+.dark * {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}

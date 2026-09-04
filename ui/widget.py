@@ -1,23 +1,34 @@
 """
 PySide6 跨平台桌面原生悬浮窗 (ui/widget.py)
-包含三态无缝切换：
-1. circle: 微型圆标 (Orb)
-2. capsule: 椭圆摘要胶囊 (CapsuleBar) - 具备任务切换、服务商徽标、快速设置、明暗主题与大触控区展开
-3. expanded: 全量网关大屏 (FullGatewayPanel) - 具备完整表单、设置窗口交互、状态栏与快捷工具
+对齐开源规范与完整桌面交互：
+1. 支持无边框窗口 8 边缘八向自由拉伸 (Resize Handles)
+2. 表头升降序实时排序 (# / 服务商 / 请求数 / 总消耗 / 命中率 / 模型)
+3. 动态列筛选浮层 (⚙ 列筛选)
+4. 单击/双击行查看详细指标与 Prompt 分析 (ItemDetailDialog)
+5. 日期切换 (📅 2026-09-04) 与 [今天] 快速重置
+6. 会话与任务级联过滤联动 (会话 -> 查看该会话所有任务)
+7. 明确 📌 钉住 (固定悬浮胶囊监控) 与当前选中的职责划分
+8. 剔除误触双击模式跳变，杜绝意外变形
 """
 
 import sys
 import platform
 import webbrowser
+from datetime import datetime
 from PySide6.QtCore import Qt, QPoint, QRectF, QTimer
 from PySide6.QtGui import (
     QPainter, QColor, QPen, QBrush, QFont, QAction, QGuiApplication,
     QCursor
 )
-from PySide6.QtWidgets import QWidget, QMenu, QApplication, QMessageBox
+from PySide6.QtWidgets import (
+    QWidget, QMenu, QApplication, QMessageBox, QInputDialog
+)
 
 from ui.settings_dialog import SettingsDialog
+from ui.detail_dialog import ItemDetailDialog
 from config import GATEWAY_HOST, GATEWAY_PORT
+
+RESIZE_MARGIN = 8
 
 class GatewayFloatingWidget(QWidget):
     def __init__(self, port: int = GATEWAY_PORT):
@@ -30,32 +41,54 @@ class GatewayFloatingWidget(QWidget):
         self.show_cost = False  # False: 显示 Token 数, True: 显示人民币预估
         self.copied_feedback = False  # 是否展示复制成功提示
 
-        # 当前选中的活跃任务索引
+        # 当前选中的活跃任务索引与 Tab 状态
         self.current_task_idx = 0
         self.active_tab = "tasks"  # "tasks" | "sessions"
-        self.selected_date = "2026-09-03"
+        self.selected_date = "2026-09-04"
+        self.session_filter_id = None  # 用于会话与任务级联筛选
 
-        # 任务列表
+        # 排序状态
+        self.sort_column = None
+        self.sort_order = "desc"  # "asc" | "desc"
+
+        # 列可见性配置
+        self.visible_cols = {
+            "pin": True,
+            "id": True,
+            "provider": True,
+            "req": True,
+            "tokens": True,
+            "hit": True,
+            "model": True,
+            "name": True,
+        }
+
+        # 任务列表 (包含所属 sessionId)
         self.tasks = [
-            {"id": 5, "pinned": True, "provider": "openai", "req": 1, "tokens": 165, "hit": 82.5, "cost": 0.0032, "model": "o3-mini", "name": "OpenAI 思考模型接入与流式 Token 统计"},
-            {"id": 4, "pinned": False, "provider": "deepseek", "req": 2, "tokens": 80, "hit": 75.0, "cost": 0.0012, "model": "deepseek-coder", "name": "连接池与长连接健康检查优化"},
-            {"id": 3, "pinned": False, "provider": "deepseek", "req": 1, "tokens": 72, "hit": 68.2, "cost": 0.0011, "model": "deepseek-coder", "name": "极简悬浮窗置顶与拖拽事件监听"},
-            {"id": 2, "pinned": False, "provider": "sensenova", "req": 2, "tokens": 70, "hit": 80.0, "cost": 0.0010, "model": "sensenova-v5-5", "name": "商汤日日新 TokenPlan 适配与路由"},
-            {"id": 1, "pinned": False, "provider": "bigmodel", "req": 4, "tokens": 276, "hit": 78.6, "cost": 0.0041, "model": "glm-4-flash", "name": "智谱 GLM 多模态路由拦截测试"},
+            {"id": 5, "sessionId": "sess_001", "pinned": True, "provider": "openai", "req": 1, "tokens": 165, "hit": 82.5, "cost": 0.0032, "model": "o3-mini", "name": "OpenAI 思考模型接入与流式 Token 统计", "time": "2026-09-04 14:32:05"},
+            {"id": 4, "sessionId": "sess_002", "pinned": False, "provider": "deepseek", "req": 2, "tokens": 80, "hit": 75.0, "cost": 0.0012, "model": "deepseek-coder", "name": "连接池与长连接健康检查优化", "time": "2026-09-04 14:28:10"},
+            {"id": 3, "sessionId": "sess_002", "pinned": False, "provider": "deepseek", "req": 1, "tokens": 72, "hit": 68.2, "cost": 0.0011, "model": "deepseek-coder", "name": "极简悬浮窗置顶与拖拽事件监听", "time": "2026-09-04 14:20:00"},
+            {"id": 2, "sessionId": "sess_003", "pinned": False, "provider": "sensenova", "req": 2, "tokens": 70, "hit": 80.0, "cost": 0.0010, "model": "sensenova-v5-5", "name": "商汤日日新 TokenPlan 适配与路由", "time": "2026-09-04 14:15:33"},
+            {"id": 1, "sessionId": "sess_001", "pinned": False, "provider": "bigmodel", "req": 4, "tokens": 276, "hit": 78.6, "cost": 0.0041, "model": "glm-4-flash", "name": "智谱 GLM 多模态路由拦截测试", "time": "2026-09-04 14:02:18"},
         ]
 
         # 会话列表
         self.sessions = [
-            {"id": "sess_001", "name": "主业务网关路由与流式转发", "provider": "openai", "model": "o3-mini", "req": 5, "tokens": 345, "hit": 82.5, "time": "14:32:05"},
-            {"id": "sess_002", "name": "代码重构辅助与测试验证", "provider": "deepseek", "model": "deepseek-coder", "req": 3, "tokens": 152, "hit": 72.0, "time": "14:28:10"},
-            {"id": "sess_003", "name": "商汤多模态图片识别分析", "provider": "sensenova", "model": "sensenova-v5-5", "req": 2, "tokens": 70, "hit": 80.0, "time": "14:15:33"},
+            {"id": "sess_001", "name": "主业务网关路由与流式转发", "provider": "openai", "model": "o3-mini", "req": 5, "tokens": 441, "hit": 80.5, "time": "2026-09-04 14:32:05", "cost": 0.0073},
+            {"id": "sess_002", "name": "代码重构辅助与测试验证", "provider": "deepseek", "model": "deepseek-coder", "req": 3, "tokens": 152, "hit": 72.0, "time": "2026-09-04 14:28:10", "cost": 0.0023},
+            {"id": "sess_003", "name": "商汤多模态图片识别分析", "provider": "sensenova", "model": "sensenova-v5-5", "req": 2, "tokens": 70, "hit": 80.0, "time": "2026-09-04 14:15:33", "cost": 0.0010},
         ]
 
         self.sprint_title = "当前冲刺: 重构流式 usage 提取及悬浮胶囊"
 
-        # 交互区域缓存 (在 paintEvent 中动态登记，在 mousePressEvent/mouseMoveEvent 中命中判定)
+        # 交互区域缓存
         self.clickable_regions = []
         self.hovered_region_id = None
+
+        # 窗口边缘拉伸状态 (八向拉伸)
+        self.resizing_edge = None
+        self.resize_start_pos = QPoint()
+        self.resize_start_geo = None
 
         # 窗口无边框置顶与透明度
         self.apply_window_flags()
@@ -78,7 +111,17 @@ class GatewayFloatingWidget(QWidget):
         self.feedback_timer.timeout.connect(self.clear_copied_feedback)
 
     @property
+    def filtered_tasks(self):
+        if self.session_filter_id:
+            return [t for t in self.tasks if t.get("sessionId") == self.session_filter_id]
+        return self.tasks
+
+    @property
     def current_task(self):
+        # 优先展示钉住的任务；若未钉住，则展示当前选中的任务
+        pinned_tasks = [t for t in self.tasks if t.get("pinned", False)]
+        if pinned_tasks:
+            return pinned_tasks[0]
         if 0 <= self.current_task_idx < len(self.tasks):
             return self.tasks[self.current_task_idx]
         return self.tasks[0]
@@ -113,7 +156,7 @@ class GatewayFloatingWidget(QWidget):
 
     @property
     def total_sessions(self):
-        return len(self.tasks)
+        return len(self.sessions)
 
     def set_tray_manager(self, tray_manager):
         self.tray_manager = tray_manager
@@ -149,7 +192,7 @@ class GatewayFloatingWidget(QWidget):
         elif mode == "capsule":
             self.resize(520, 44)
         elif mode == "expanded":
-            self.resize(780, 500)
+            self.resize(800, 520)
         
         self.move(old_center.x() - self.width() // 2, old_center.y() - self.height() // 2)
         self.update()
@@ -168,14 +211,7 @@ class GatewayFloatingWidget(QWidget):
 
     def on_settings_saved(self, settings: dict):
         self.port = settings.get("port", self.port)
-        self.always_on_top = settings.get("always_on_top", True)
         self.is_dark = settings.get("is_dark", True)
-        opacity = settings.get("opacity", 1.0)
-        self.setWindowOpacity(opacity)
-        self.apply_window_flags()
-        self.show()
-        if "mode" in settings:
-            self.set_mode(settings["mode"])
         self.update()
 
     def prev_task(self):
@@ -198,14 +234,157 @@ class GatewayFloatingWidget(QWidget):
         self.update()
 
     # ------------------------------------------------------------------------
-    # 鼠标与快捷键事件处理 (实现 100% 精确触控)
+    # 排序与列筛选
     # ------------------------------------------------------------------------
+    def sort_by_column(self, col_key: str):
+        if self.sort_column == col_key:
+            self.sort_order = "asc" if self.sort_order == "desc" else "desc"
+        else:
+            self.sort_column = col_key
+            self.sort_order = "desc"
+
+        reverse = (self.sort_order == "desc")
+        if self.active_tab == "tasks":
+            self.tasks.sort(key=lambda x: x.get(col_key, 0), reverse=reverse)
+        else:
+            self.sessions.sort(key=lambda x: x.get(col_key, 0), reverse=reverse)
+        self.update()
+
+    def open_column_filter_menu(self, global_pos: QPoint):
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {'#131720' if self.is_dark else '#ffffff'};
+                border: 1px solid {'#334155' if self.is_dark else '#cbd5e1'};
+                border-radius: 8px;
+                padding: 6px;
+                color: {'#f1f5f9' if self.is_dark else '#0f172a'};
+                font-size: 11px;
+            }}
+            QMenu::item {{
+                padding: 4px 18px 4px 8px;
+                border-radius: 4px;
+            }}
+            QMenu::item:selected {{
+                background-color: #0284c7;
+                color: #ffffff;
+            }}
+        """)
+
+        cols = [
+            ("pin", "📌 钉住状态"),
+            ("id", "# 序号/ID"),
+            ("provider", "服务商徽标"),
+            ("req", "请求数"),
+            ("tokens", "总消耗 Token"),
+            ("hit", "Prompt 命中率"),
+            ("model", "模型名称"),
+            ("name", "任务标题/描述"),
+        ]
+
+        for key, name in cols:
+            act = QAction(name, menu)
+            act.setCheckable(True)
+            act.setChecked(self.visible_cols.get(key, True))
+            act.triggered.connect(lambda chk, k=key: self.toggle_column_vis(k, chk))
+            menu.addAction(act)
+
+        menu.exec(global_pos)
+
+    def toggle_column_vis(self, key: str, checked: bool):
+        self.visible_cols[key] = checked
+        self.update()
+
+    def open_date_picker(self):
+        text, ok = QInputDialog.getItem(
+            self, "选择查看日期", "请选择要查看的历史日期或快速重置：",
+            ["2026-09-04 (今天)", "2026-09-03 (昨天)", "2026-09-02", "2026-09-01"],
+            0, False
+        )
+        if ok and text:
+            self.selected_date = text.split(" ")[0]
+            self.update()
+
+    def reset_today(self):
+        self.selected_date = "2026-09-04"
+        self.session_filter_id = None
+        self.update()
+
+    def open_item_detail(self, item_data: dict, item_type: str = "task"):
+        dlg = ItemDetailDialog(
+            item_data=item_data,
+            item_type=item_type,
+            is_dark=self.is_dark,
+            parent=self,
+            on_toggle_pin=self.on_detail_toggle_pin,
+            on_filter_session=self.on_detail_filter_session
+        )
+        dlg.exec()
+
+    def on_detail_toggle_pin(self, item_id, is_pinned):
+        for t in self.tasks:
+            if t["id"] == item_id:
+                t["pinned"] = is_pinned
+            else:
+                # 单选钉住，确保胶囊锁定唯一项
+                if is_pinned:
+                    t["pinned"] = False
+        self.update()
+
+    def on_detail_filter_session(self, sess_id: str):
+        self.session_filter_id = sess_id
+        self.active_tab = "tasks"
+        self.update()
+
+    # ------------------------------------------------------------------------
+    # 八向边缘拉伸算法与鼠标事件
+    # ------------------------------------------------------------------------
+    def calculate_resize_edge(self, pos: QPoint) -> str:
+        if self.mode != "expanded":
+            return None
+        x, y = pos.x(), pos.y()
+        w, h = self.width(), self.height()
+        m = RESIZE_MARGIN
+
+        on_left = x <= m
+        on_right = x >= w - m
+        on_top = y <= m
+        on_bottom = y >= h - m
+
+        if on_top and on_left:
+            return "top-left"
+        if on_top and on_right:
+            return "top-right"
+        if on_bottom and on_left:
+            return "bottom-left"
+        if on_bottom and on_right:
+            return "bottom-right"
+        if on_left:
+            return "left"
+        if on_right:
+            return "right"
+        if on_top:
+            return "top"
+        if on_bottom:
+            return "bottom"
+        return None
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            pos = event.position()
-            # 优先判定是否点击了已登记的按钮控件
+            pos = event.position().toPoint()
+
+            # 1. 优先判定边缘拉伸 (仅 expanded 状态支持八向自由拉伸)
+            edge = self.calculate_resize_edge(pos)
+            if edge:
+                self.resizing_edge = edge
+                self.resize_start_pos = event.globalPosition().toPoint()
+                self.resize_start_geo = self.geometry()
+                event.accept()
+                return
+
+            # 2. 判定按钮与热区命中
             for reg in self.clickable_regions:
-                if reg["rect"].contains(pos):
+                if reg["rect"].contains(event.position()):
                     act = reg["action"]
                     if act == "shrink_circle":
                         self.set_mode("circle")
@@ -240,24 +419,82 @@ class GatewayFloatingWidget(QWidget):
                                 t["pinned"] = not t["pinned"]
                         self.update()
                     elif act == "select_task":
-                        self.current_task_idx = reg.get("data", 0)
+                        idx = reg.get("data", 0)
+                        self.current_task_idx = idx
+                        self.open_item_detail(self.filtered_tasks[idx], "task")
+                        self.update()
+                    elif act == "select_session":
+                        idx = reg.get("data", 0)
+                        self.open_item_detail(self.sessions[idx], "session")
                         self.update()
                     elif act == "select_tab":
                         self.active_tab = reg.get("data", "tasks")
                         self.update()
+                    elif act == "sort_col":
+                        self.sort_by_column(reg.get("data"))
+                    elif act == "open_filter":
+                        self.open_column_filter_menu(event.globalPosition().toPoint())
+                    elif act == "open_date":
+                        self.open_date_picker()
+                    elif act == "reset_today":
+                        self.reset_today()
+                    elif act == "clear_session_filter":
+                        self.session_filter_id = None
+                        self.update()
                     event.accept()
                     return
 
-            # 如果未点击任何按钮，则启动窗口拖拽
+            # 3. 窗口拖拽移动
             self.is_dragging = True
             self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
 
     def mouseMoveEvent(self, event):
-        pos = event.position()
+        pos = event.position().toPoint()
+
+        # 处理八向拉伸中
+        if self.resizing_edge and event.buttons() == Qt.MouseButton.LeftButton:
+            delta = event.globalPosition().toPoint() - self.resize_start_pos
+            geo = self.resize_start_geo
+            x, y, w, h = geo.x(), geo.y(), geo.width(), geo.height()
+            min_w, min_h = 680, 420
+
+            if "right" in self.resizing_edge:
+                w = max(min_w, geo.width() + delta.x())
+            if "bottom" in self.resizing_edge:
+                h = max(min_h, geo.height() + delta.y())
+            if "left" in self.resizing_edge:
+                new_w = max(min_w, geo.width() - delta.x())
+                if new_w != min_w:
+                    x = geo.x() + delta.x()
+                w = new_w
+            if "top" in self.resizing_edge:
+                new_h = max(min_h, geo.height() - delta.y())
+                if new_h != min_h:
+                    y = geo.y() + delta.y()
+                h = new_h
+
+            self.setGeometry(x, y, w, h)
+            event.accept()
+            return
+
+        # 悬停边缘光标变化
+        edge = self.calculate_resize_edge(pos)
+        if edge:
+            if edge in ("top-left", "bottom-right"):
+                self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            elif edge in ("top-right", "bottom-left"):
+                self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+            elif edge in ("left", "right"):
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif edge in ("top", "bottom"):
+                self.setCursor(Qt.CursorShape.SizeVerCursor)
+            return
+
+        # 悬停普通按钮热区
         hovered_act = None
         for reg in self.clickable_regions:
-            if reg["rect"].contains(pos):
+            if reg["rect"].contains(event.position()):
                 hovered_act = reg["id"]
                 break
 
@@ -269,6 +506,7 @@ class GatewayFloatingWidget(QWidget):
                 self.setCursor(Qt.CursorShape.ArrowCursor)
             self.update()
 
+        # 拖拽移动
         if self.is_dragging and event.buttons() == Qt.MouseButton.LeftButton:
             new_pos = event.globalPosition().toPoint() - self.drag_position
             if platform.system() == "Darwin":
@@ -278,22 +516,12 @@ class GatewayFloatingWidget(QWidget):
 
     def mouseReleaseEvent(self, event):
         self.is_dragging = False
-
-    def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            # 双击背景切换形态
-            modes = ["circle", "capsule", "expanded"]
-            next_idx = (modes.index(self.mode) + 1) % len(modes)
-            self.set_mode(modes[next_idx])
+        self.resizing_edge = None
 
     def keyPressEvent(self, event):
         key = event.key()
         if key == Qt.Key.Key_Escape:
             self.set_mode("capsule" if self.mode == "expanded" else "circle")
-        elif key in (Qt.Key.Key_Tab, Qt.Key.Key_Space):
-            modes = ["circle", "capsule", "expanded"]
-            next_idx = (modes.index(self.mode) + 1) % len(modes)
-            self.set_mode(modes[next_idx])
         elif key in (Qt.Key.Key_Left, Qt.Key.Key_A, Qt.Key.Key_W):
             self.prev_task()
         elif key in (Qt.Key.Key_Right, Qt.Key.Key_D, Qt.Key.Key_S):
@@ -308,7 +536,7 @@ class GatewayFloatingWidget(QWidget):
         menu.setStyleSheet(f"""
             QMenu {{
                 background-color: {'#11141c' if self.is_dark else '#ffffff'};
-                border: 1px solid {'rgba(255, 255, 255, 0.15)' if self.is_dark else '#cbd5e1'};
+                border: 1px solid {'#334155' if self.is_dark else '#cbd5e1'};
                 border-radius: 8px;
                 padding: 6px;
                 color: {'#e2e8f0' if self.is_dark else '#0f172a'};
@@ -324,7 +552,7 @@ class GatewayFloatingWidget(QWidget):
             }}
             QMenu::separator {{
                 height: 1px;
-                background-color: {'rgba(255, 255, 255, 0.1)' if self.is_dark else '#e2e8f0'};
+                background-color: {'#1e293b' if self.is_dark else '#e2e8f0'};
                 margin: 4px 6px;
             }}
         """)
@@ -344,267 +572,191 @@ class GatewayFloatingWidget(QWidget):
         theme_act.triggered.connect(self.toggle_theme)
         menu.addAction(theme_act)
 
-        settings_act = QAction("⚙️ 打开参数与路由设置...", menu)
+        settings_act = QAction("⚙️ 打开用量网关设置...", menu)
         settings_act.triggered.connect(self.open_settings)
         menu.addAction(settings_act)
 
         menu.addSeparator()
-
-        top_action = QAction("✓ 保持窗口置顶" if self.always_on_top else "📌 保持窗口置顶", menu)
-        def toggle_top():
-            self.always_on_top = not self.always_on_top
-            self.apply_window_flags()
-            self.show()
-        top_action.triggered.connect(toggle_top)
-        menu.addAction(top_action)
-
-        reset_act = QAction("🎯 重置到右上角", menu)
-        reset_act.triggered.connect(self.reset_position)
-        menu.addAction(reset_act)
-
-        menu.addSeparator()
-
-        copy_act = QAction(f"📋 复制接入地址 (http://127.0.0.1:{self.port}/v1)", menu)
-        copy_act.triggered.connect(self.copy_gateway_url)
-        menu.addAction(copy_act)
-
-        web_act = QAction("🌐 打开 Web 仪表盘", menu)
-        web_act.triggered.connect(lambda: webbrowser.open(f"http://127.0.0.1:{self.port}"))
-        menu.addAction(web_act)
-
-        menu.addSeparator()
-
-        quit_act = QAction("🚪 退出 TokenTrackerGateway", menu)
-        if self.tray_manager:
-            quit_act.triggered.connect(self.tray_manager.quit_application)
-        else:
-            quit_act.triggered.connect(self.close)
+        quit_act = QAction("✕ 退出程序", menu)
+        quit_act.triggered.connect(QApplication.instance().quit)
         menu.addAction(quit_act)
 
         menu.exec(event.globalPos())
 
     # ------------------------------------------------------------------------
-    # 原生绘制与控件交互区域注册
+    # 纯原生绘图引擎 (QPainter 100% 自绘制无锯齿渲染)
     # ------------------------------------------------------------------------
     def paintEvent(self, event):
-        self.clickable_regions = []
+        self.clickable_regions.clear()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
 
-        rect = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        rect = self.rect()
+        is_mac = (platform.system() == "Darwin")
 
         # --------------------------------------------------------------------
-        # 1. 微型圆标态 (Orb)
+        # 1. 微型圆标模式 (Circle / Orb)
         # --------------------------------------------------------------------
         if self.mode == "circle":
-            bg_color = QColor(11, 15, 25, 245) if self.is_dark else QColor(255, 255, 255, 245)
-            border_color = QColor(40, 50, 70) if self.is_dark else QColor(203, 213, 225)
+            bg_color = QColor(15, 23, 42, 235) if self.is_dark else QColor(255, 255, 255, 245)
+            border_color = QColor(56, 189, 248, 180) if self.is_dark else QColor(2, 132, 199, 160)
+            
             painter.setBrush(QBrush(bg_color))
             painter.setPen(QPen(border_color, 1.5))
-            painter.drawEllipse(rect)
+            painter.drawEllipse(rect.adjusted(2, 2, -2, -2))
 
-            # 绿色命中率刻度环
-            green_pen = QPen(QColor(52, 211, 153), 3.0)
-            green_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            painter.setPen(green_pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            span = int((self.cache_hit_rate / 100.0) * 360 * 16)
-            painter.drawArc(rect.adjusted(4, 4, -4, -4), 90 * 16, -span)
+            painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+            painter.setPen(QColor(56, 189, 248))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{int(self.cache_hit_rate)}%")
 
-            # 中心亮蓝发光核心
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(56, 189, 248)))
-            painter.drawEllipse(rect.adjusted(14, 14, -14, -14))
-
-            # 注册点击圆标展开为胶囊
-            self.clickable_regions.append({"id": "orb_expand", "rect": rect, "action": "shrink_capsule"})
-            return
+            self.clickable_regions.append({"id": "orb_expand", "rect": QRectF(rect), "action": "shrink_capsule"})
 
         # --------------------------------------------------------------------
-        # 2. 椭圆摘要胶囊态 (CapsuleBar)
+        # 2. 长条胶囊模式 (CapsuleBar)
         # --------------------------------------------------------------------
-        if self.mode == "capsule":
-            radius = rect.height() / 2
-            bg_color = QColor(13, 17, 26, 248) if self.is_dark else QColor(255, 255, 255, 248)
-            border_color = QColor(56, 189, 248, 80) if self.is_dark else QColor(203, 213, 225)
+        elif self.mode == "capsule":
+            bg_color = QColor(13, 17, 26, 240) if self.is_dark else QColor(255, 255, 255, 245)
+            border_color = QColor(38, 48, 68) if self.is_dark else QColor(226, 232, 240)
+            
             painter.setBrush(QBrush(bg_color))
             painter.setPen(QPen(border_color, 1.2))
-            painter.drawRoundedRect(rect, radius, radius)
+            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 22, 22)
 
-            # (1) 左侧微型圆标 (点击收缩为 Orb)
-            orb_rect = QRectF(rect.x() + 5, rect.y() + 5, 34, 34)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(20, 26, 38) if self.is_dark else QColor(241, 245, 249)))
-            painter.drawEllipse(orb_rect)
-
-            green_pen = QPen(QColor(52, 211, 153), 2.5)
-            green_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            painter.setPen(green_pen)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            span = int((self.cache_hit_rate / 100.0) * 360 * 16)
-            painter.drawArc(orb_rect.adjusted(3, 3, -3, -3), 90 * 16, -span)
-
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(56, 189, 248)))
-            painter.drawEllipse(orb_rect.adjusted(10, 10, -10, -10))
-            self.clickable_regions.append({"id": "cap_orb", "rect": orb_rect, "action": "shrink_circle"})
-
-            # (2) 服务商徽标 (OpenAI/DeepSeek/Claude/Sense/GLM)
-            prov_rect = QRectF(rect.x() + 44, rect.y() + 8, 48, 28)
-            prov_bg = QColor(6, 78, 59, 140) if self.provider == "openai" else QColor(12, 74, 110, 140)
-            prov_text_color = QColor(52, 211, 153) if self.provider == "openai" else QColor(56, 189, 248)
-            painter.setBrush(QBrush(prov_bg))
-            painter.setPen(QPen(prov_text_color, 1))
-            painter.drawRoundedRect(prov_rect, 5, 5)
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 8, QFont.Weight.Bold))
-            painter.setPen(prov_text_color)
-            prov_label = "OpenAI" if self.provider == "openai" else ("DeepSeek" if self.provider == "deepseek" else self.provider[:6])
-            painter.drawText(prov_rect, Qt.AlignmentFlag.AlignCenter, prov_label)
-
-            # (3) 任务切换器 < 标题 >
-            prev_btn_rect = QRectF(rect.x() + 96, rect.y() + 8, 20, 28)
-            painter.setPen(QColor(148, 163, 184))
+            # (1) 切换任务按钮 <
+            prev_rect = QRectF(rect.x() + 8, rect.y() + 8, 24, 28)
             painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
-            painter.drawText(prev_btn_rect, Qt.AlignmentFlag.AlignCenter, "◀")
-            self.clickable_regions.append({"id": "cap_prev", "rect": prev_btn_rect, "action": "prev_task"})
+            painter.setPen(QColor(148, 163, 184))
+            painter.drawText(prev_rect, Qt.AlignmentFlag.AlignCenter, "‹")
+            self.clickable_regions.append({"id": "cap_prev", "rect": prev_rect, "action": "prev_task"})
 
-            title_rect = QRectF(rect.x() + 118, rect.y(), 115, rect.height())
+            # (2) 服务商彩色徽标
+            badge_rect = QRectF(rect.x() + 34, rect.y() + 10, 36, 24)
+            p_code = self.provider
+            if p_code == "openai":
+                painter.setBrush(QBrush(QColor(6, 78, 59, 180)))
+                painter.setPen(QPen(QColor(52, 211, 153), 1))
+                painter.drawRoundedRect(badge_rect, 4, 4)
+                painter.setPen(QColor(52, 211, 153))
+                painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, "OA")
+            elif p_code == "deepseek":
+                painter.setBrush(QBrush(QColor(12, 74, 110, 180)))
+                painter.setPen(QPen(QColor(56, 189, 248), 1))
+                painter.drawRoundedRect(badge_rect, 4, 4)
+                painter.setPen(QColor(56, 189, 248))
+                painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, "DS")
+            elif p_code == "sensenova":
+                painter.setBrush(QBrush(QColor(88, 28, 135, 180)))
+                painter.setPen(QPen(QColor(192, 132, 252), 1))
+                painter.drawRoundedRect(badge_rect, 4, 4)
+                painter.setPen(QColor(192, 132, 252))
+                painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, "SN")
+            else:
+                painter.setBrush(QBrush(QColor(30, 41, 59, 180)))
+                painter.setPen(QPen(QColor(148, 163, 184), 1))
+                painter.drawRoundedRect(badge_rect, 4, 4)
+                painter.setPen(QColor(148, 163, 184))
+                painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, "GLM")
+
+            # (3) 切换任务按钮 >
+            next_rect = QRectF(rect.x() + 74, rect.y() + 8, 24, 28)
+            painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+            painter.setPen(QColor(148, 163, 184))
+            painter.drawText(next_rect, Qt.AlignmentFlag.AlignCenter, "›")
+            self.clickable_regions.append({"id": "cap_next", "rect": next_rect, "action": "next_task"})
+
+            # (4) 任务简述
+            title_rect = QRectF(rect.x() + 102, rect.y() + 8, 180, 28)
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 9))
             painter.setPen(QColor(241, 245, 249) if self.is_dark else QColor(15, 23, 42))
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 9, QFont.Weight.Bold))
-            title_text = f"#{self.current_task.get('id', 1)} " + self.session_title
-            painter.drawText(title_rect, Qt.AlignmentFlag.AlignVCenter, title_text[:11] + "..")
-            self.clickable_regions.append({"id": "cap_title", "rect": title_rect, "action": "expand_full"})
+            title_txt = painter.fontMetrics().elidedText(self.session_title, Qt.TextElideMode.ElideRight, 175)
+            painter.drawText(title_rect, Qt.AlignmentFlag.AlignVCenter, title_txt)
 
-            next_btn_rect = QRectF(rect.x() + 235, rect.y() + 8, 20, 28)
-            painter.setPen(QColor(148, 163, 184))
-            painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
-            painter.drawText(next_btn_rect, Qt.AlignmentFlag.AlignCenter, "▶")
-            self.clickable_regions.append({"id": "cap_next", "rect": next_btn_rect, "action": "next_task"})
-
-            # (4) 请求数药丸
-            req_x = rect.x() + 258
-            req_rect = QRectF(req_x, rect.y() + 9, 44, 26)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(30, 41, 59) if self.is_dark else QColor(241, 245, 249)))
-            painter.drawRoundedRect(req_rect, 13, 13)
-            painter.setPen(QColor(203, 213, 225) if self.is_dark else QColor(71, 85, 105))
-            painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
-            painter.drawText(req_rect, Qt.AlignmentFlag.AlignCenter, f"请求 {self.requests_count}")
-
-            # (5) Token / 金额切换药丸 (点击切换 tok / ¥)
-            tok_x = req_x + 48
-            tok_rect = QRectF(tok_x, rect.y() + 9, 58, 26)
-            painter.setBrush(QBrush(QColor(26, 33, 48) if self.is_dark else QColor(241, 245, 249)))
-            painter.drawRoundedRect(tok_rect, 13, 13)
-            painter.setPen(QColor(148, 163, 184) if self.is_dark else QColor(100, 116, 139))
-            val_text = f"¥{self.cost_cny:.3f}" if self.show_cost else f"tok {self.total_tokens}"
-            painter.drawText(tok_rect, Qt.AlignmentFlag.AlignCenter, val_text)
+            # (5) 消耗数值
+            tok_rect = QRectF(rect.x() + 286, rect.y() + 10, 75, 24)
+            painter.setBrush(QBrush(QColor(12, 74, 110, 100) if self.is_dark else QColor(224, 242, 254)))
+            painter.setPen(QPen(QColor(56, 189, 248, 80), 1))
+            painter.drawRoundedRect(tok_rect, 12, 12)
+            painter.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
+            painter.setPen(QColor(56, 189, 248) if self.is_dark else QColor(2, 132, 199))
+            tok_str = f"¥{self.cost_cny:.3f}" if self.show_cost else f"tok {self.total_tokens}"
+            painter.drawText(tok_rect, Qt.AlignmentFlag.AlignCenter, tok_str)
             self.clickable_regions.append({"id": "cap_cost", "rect": tok_rect, "action": "toggle_cost"})
 
-            # (6) 命中率药丸
-            hit_x = tok_x + 62
-            hit_rect = QRectF(hit_x, rect.y() + 9, 54, 26)
-            painter.setBrush(QBrush(QColor(6, 78, 59, 180) if self.is_dark else QColor(236, 253, 245)))
-            painter.setPen(QPen(QColor(52, 211, 153, 120), 1))
-            painter.drawRoundedRect(hit_rect, 13, 13)
+            # (6) 命中率绿牌
+            hit_rect = QRectF(rect.x() + 366, rect.y() + 10, 68, 24)
+            painter.setBrush(QBrush(QColor(6, 78, 59, 140) if self.is_dark else QColor(236, 253, 245)))
+            painter.setPen(QPen(QColor(52, 211, 153, 80), 1))
+            painter.drawRoundedRect(hit_rect, 12, 12)
+            painter.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
             painter.setPen(QColor(52, 211, 153) if self.is_dark else QColor(5, 150, 105))
-            painter.drawText(hit_rect, Qt.AlignmentFlag.AlignCenter, f"⚡ {self.cache_hit_rate:.1f}%")
+            painter.drawText(hit_rect, Qt.AlignmentFlag.AlignCenter, f"⚡{self.cache_hit_rate:.1f}%")
 
-            # (7) 主题与设置按钮
-            theme_x = hit_x + 58
-            theme_rect = QRectF(theme_x, rect.y() + 9, 24, 26)
-            painter.setPen(QColor(245, 158, 11) if self.is_dark else QColor(100, 116, 139))
-            painter.setFont(QFont("Segoe UI Emoji" if platform.system() == "Windows" else "Apple Color Emoji", 9))
-            painter.drawText(theme_rect, Qt.AlignmentFlag.AlignCenter, "🌙" if self.is_dark else "☀️")
-            self.clickable_regions.append({"id": "cap_theme", "rect": theme_rect, "action": "toggle_theme"})
+            # (7) 展开/控制按钮
+            theme_btn = QRectF(rect.x() + 438, rect.y() + 10, 24, 24)
+            painter.setFont(QFont("Segoe UI Emoji" if platform.system() == "Windows" else "Apple Color Emoji", 8))
+            painter.drawText(theme_btn, Qt.AlignmentFlag.AlignCenter, "🌙" if self.is_dark else "☀️")
+            self.clickable_regions.append({"id": "cap_theme", "rect": theme_btn, "action": "toggle_theme"})
 
-            settings_x = theme_x + 24
-            set_rect = QRectF(settings_x, rect.y() + 9, 24, 26)
+            set_btn = QRectF(rect.x() + 462, rect.y() + 10, 24, 24)
+            painter.setFont(QFont("Segoe UI Emoji" if platform.system() == "Windows" else "Apple Color Emoji", 8))
+            painter.drawText(set_btn, Qt.AlignmentFlag.AlignCenter, "⚙")
+            self.clickable_regions.append({"id": "cap_set", "rect": set_btn, "action": "open_settings"})
+
+            expand_btn = QRectF(rect.x() + 486, rect.y() + 10, 26, 24)
+            painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
             painter.setPen(QColor(148, 163, 184))
-            painter.drawText(set_rect, Qt.AlignmentFlag.AlignCenter, "⚙")
-            self.clickable_regions.append({"id": "cap_set", "rect": set_rect, "action": "open_settings"})
-
-            # (8) 放大展开全量面板按钮 (大尺寸触控区 30x30)
-            expand_x = settings_x + 24
-            expand_rect = QRectF(expand_x, rect.y() + 7, 28, 30)
-            if self.hovered_region_id == "cap_expand":
-                painter.setBrush(QBrush(QColor(56, 189, 248, 60)))
-                painter.setPen(QPen(QColor(56, 189, 248), 1))
-                painter.drawRoundedRect(expand_rect, 6, 6)
-            painter.setPen(QColor(56, 189, 248) if self.hovered_region_id == "cap_expand" else QColor(148, 163, 184))
-            painter.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-            painter.drawText(expand_rect, Qt.AlignmentFlag.AlignCenter, "⤢")
-            self.clickable_regions.append({"id": "cap_expand", "rect": expand_rect, "action": "expand_full"})
-            return
+            painter.drawText(expand_btn, Qt.AlignmentFlag.AlignCenter, "⤢")
+            self.clickable_regions.append({"id": "cap_expand", "rect": expand_btn, "action": "expand_full"})
 
         # --------------------------------------------------------------------
-        # 3. 全量大屏看板态 (Full Dashboard Panel)
+        # 3. 全量大看板模式 (Expanded Full Panel)
         # --------------------------------------------------------------------
-        if self.mode == "expanded":
+        elif self.mode == "expanded":
             bg_color = QColor(13, 17, 26, 252) if self.is_dark else QColor(255, 255, 255, 252)
-            border_color = QColor(45, 55, 75) if self.is_dark else QColor(226, 232, 240)
+            border_color = QColor(38, 48, 68) if self.is_dark else QColor(203, 213, 225)
+            
             painter.setBrush(QBrush(bg_color))
-            painter.setPen(QPen(border_color, 1.5))
-            painter.drawRoundedRect(rect, 14, 14)
+            painter.setPen(QPen(border_color, 1.2))
+            painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 14, 14)
 
-            # 判定平台
-            is_mac = (platform.system() == "Darwin")
+            # (1) 顶栏 Header
             header_rect = QRectF(rect.x(), rect.y(), rect.width(), 44)
             painter.setBrush(QBrush(QColor(18, 24, 38) if self.is_dark else QColor(248, 250, 252)))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(header_rect, 14, 14)
-            painter.drawRect(QRectF(rect.x(), rect.y() + 26, rect.width(), 18))
 
-            title_left_x = rect.x() + 16
+            # 区分 macOS 红绿灯 vs Windows 呼吸灯
             center_y = rect.y() + 22
-
             if is_mac:
-                # ── macOS 风格: 左上角红黄绿红绿灯 ──
-                red_hit = QRectF(rect.x() + 8, rect.y() + 6, 24, 30)
-                red_circ = QRectF(rect.x() + 14, center_y - 6, 12, 12)
+                r_red = QRectF(rect.x() + 16, center_y - 6, 12, 12)
+                r_yel = QRectF(rect.x() + 34, center_y - 6, 12, 12)
+                r_grn = QRectF(rect.x() + 52, center_y - 6, 12, 12)
+
                 painter.setBrush(QBrush(QColor(239, 68, 68)))
-                painter.setPen(QPen(QColor(220, 38, 38), 0.8))
-                painter.drawEllipse(red_circ)
-                if self.hovered_region_id == "win_close":
-                    painter.setPen(QColor(69, 10, 10))
-                    painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
-                    painter.drawText(red_circ, Qt.AlignmentFlag.AlignCenter, "×")
-                self.clickable_regions.append({"id": "win_close", "rect": red_hit, "action": "close_app"})
-
-                yellow_hit = QRectF(rect.x() + 32, rect.y() + 6, 22, 30)
-                yellow_circ = QRectF(rect.x() + 36, center_y - 6, 12, 12)
+                painter.drawEllipse(r_red)
                 painter.setBrush(QBrush(QColor(245, 158, 11)))
-                painter.setPen(QPen(QColor(217, 119, 6), 0.8))
-                painter.drawEllipse(yellow_circ)
-                if self.hovered_region_id == "win_orb":
-                    painter.setPen(QColor(69, 26, 3))
-                    painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
-                    painter.drawText(yellow_circ, Qt.AlignmentFlag.AlignCenter, "−")
-                self.clickable_regions.append({"id": "win_orb", "rect": yellow_hit, "action": "shrink_circle"})
+                painter.drawEllipse(r_yel)
+                painter.setBrush(QBrush(QColor(34, 197, 94)))
+                painter.drawEllipse(r_grn)
 
-                green_hit = QRectF(rect.x() + 54, rect.y() + 6, 24, 30)
-                green_circ = QRectF(rect.x() + 58, center_y - 6, 12, 12)
-                painter.setBrush(QBrush(QColor(16, 185, 129)))
-                painter.setPen(QPen(QColor(5, 150, 105), 0.8))
-                painter.drawEllipse(green_circ)
-                if self.hovered_region_id == "win_cap":
-                    painter.setPen(QColor(6, 78, 59))
-                    painter.setFont(QFont("Arial", 7, QFont.Weight.Bold))
-                    painter.drawText(green_circ, Qt.AlignmentFlag.AlignCenter, "⤡")
-                self.clickable_regions.append({"id": "win_cap", "rect": green_hit, "action": "shrink_capsule"})
-
-                title_left_x = rect.x() + 82
+                self.clickable_regions.append({"id": "mac_close", "rect": r_red, "action": "close_app"})
+                self.clickable_regions.append({"id": "mac_min", "rect": r_yel, "action": "shrink_capsule"})
+                self.clickable_regions.append({"id": "mac_orb", "rect": r_grn, "action": "shrink_circle"})
+                title_left_x = rect.x() + 76
             else:
-                # ── Windows 风格: 左上角天蓝色呼吸指示圆点 ──
                 dot_circ = QRectF(rect.x() + 16, center_y - 5, 10, 10)
                 painter.setBrush(QBrush(QColor(56, 189, 248)))
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawEllipse(dot_circ)
                 title_left_x = rect.x() + 34
 
-            # 用量网关标题与端口
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 10, QFont.Weight.Bold))
+            # 标题与端口
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 10, QFont.Weight.Bold))
             painter.setPen(QColor(241, 245, 249) if self.is_dark else QColor(15, 23, 42))
             painter.drawText(QRectF(title_left_x, rect.y(), 66, 44), Qt.AlignmentFlag.AlignVCenter, "用量网关")
 
@@ -617,58 +769,41 @@ class GatewayFloatingWidget(QWidget):
             painter.drawText(port_rect, Qt.AlignmentFlag.AlignCenter, f":{self.port}")
 
             # 汇总指标
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 9))
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 9))
             painter.setPen(QColor(148, 163, 184) if self.is_dark else QColor(100, 116, 139))
             painter.drawText(QRectF(title_left_x + 124, rect.y(), 250, 44), Qt.AlignmentFlag.AlignVCenter, f"请求 {self.total_requests} · 会话 {self.total_sessions} · 命中 {self.cache_hit_rate:.1f}%")
 
-            # 顶部右侧工具栏: 主题 + 设置 + 收起胶囊 + 收起圆标 (+ Windows 关闭键)
+            # 顶部右侧工具栏
             right_width = 240 if not is_mac else 200
             right_x = rect.right() - right_width
             
-            # 主题切换
             theme_btn = QRectF(right_x, rect.y() + 10, 28, 24)
             painter.setFont(QFont("Segoe UI Emoji" if platform.system() == "Windows" else "Apple Color Emoji", 9))
             painter.setPen(QColor(245, 158, 11) if self.is_dark else QColor(100, 116, 139))
             painter.drawText(theme_btn, Qt.AlignmentFlag.AlignCenter, "🌙" if self.is_dark else "☀️")
             self.clickable_regions.append({"id": "panel_theme", "rect": theme_btn, "action": "toggle_theme"})
 
-            # 设置按钮
             set_btn = QRectF(right_x + 32, rect.y() + 8, 56, 28)
             if self.hovered_region_id == "panel_set":
                 painter.setBrush(QBrush(QColor(56, 189, 248, 40)))
                 painter.setPen(QPen(QColor(56, 189, 248), 1))
                 painter.drawRoundedRect(set_btn, 4, 4)
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 8, QFont.Weight.Bold))
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 8, QFont.Weight.Bold))
             painter.setPen(QColor(241, 245, 249) if self.is_dark else QColor(15, 23, 42))
             painter.drawText(set_btn, Qt.AlignmentFlag.AlignCenter, "⚙ 设置")
             self.clickable_regions.append({"id": "panel_set", "rect": set_btn, "action": "open_settings"})
 
-            # 分隔线
-            painter.setPen(QPen(QColor(71, 85, 105) if self.is_dark else QColor(203, 213, 225), 1))
-            painter.drawLine(int(right_x + 94), int(rect.y() + 14), int(right_x + 94), int(rect.y() + 30))
-
-            # 收缩回胶囊 ⤢
             shrink_cap_btn = QRectF(right_x + 100, rect.y() + 8, 32, 28)
-            if self.hovered_region_id == "panel_cap":
-                painter.setBrush(QBrush(QColor(255, 255, 255, 20)))
-                painter.setPen(QPen(QColor(255, 255, 255, 60), 1))
-                painter.drawRoundedRect(shrink_cap_btn, 4, 4)
             painter.setFont(QFont("Arial", 10, QFont.Weight.Bold))
             painter.setPen(QColor(148, 163, 184))
             painter.drawText(shrink_cap_btn, Qt.AlignmentFlag.AlignCenter, "↗")
             self.clickable_regions.append({"id": "panel_cap", "rect": shrink_cap_btn, "action": "shrink_capsule"})
 
-            # 收缩回圆标 ⦿
             shrink_orb_btn = QRectF(right_x + 136, rect.y() + 8, 32, 28)
-            if self.hovered_region_id == "panel_orb":
-                painter.setBrush(QBrush(QColor(255, 255, 255, 20)))
-                painter.setPen(QPen(QColor(255, 255, 255, 60), 1))
-                painter.drawRoundedRect(shrink_orb_btn, 4, 4)
             painter.setFont(QFont("Arial", 11))
             painter.drawText(shrink_orb_btn, Qt.AlignmentFlag.AlignCenter, "⦿")
             self.clickable_regions.append({"id": "panel_orb", "rect": shrink_orb_btn, "action": "shrink_circle"})
 
-            # Windows 专有右上角 X 关闭按钮
             if not is_mac:
                 win_close_btn = QRectF(right_x + 174, rect.y() + 6, 36, 32)
                 if self.hovered_region_id == "win_close_btn":
@@ -682,20 +817,21 @@ class GatewayFloatingWidget(QWidget):
                 painter.drawText(win_close_btn, Qt.AlignmentFlag.AlignCenter, "✕")
                 self.clickable_regions.append({"id": "win_close_btn", "rect": win_close_btn, "action": "close_app"})
 
-            # (2) 第二行: 日历 + 当前冲刺 + 列筛选
+            # (2) 第二行: 日历 + 冲刺 + 会话级联筛选标签 + 列筛选
             sub_bar_rect = QRectF(rect.x() + 16, rect.y() + 52, rect.width() - 32, 34)
             painter.setBrush(QBrush(QColor(18, 24, 38) if self.is_dark else QColor(241, 245, 249)))
             painter.setPen(QPen(QColor(38, 48, 68) if self.is_dark else QColor(226, 232, 240), 1))
             painter.drawRoundedRect(sub_bar_rect, 6, 6)
 
-            # 日历输入药丸
+            # 日历药丸
             date_rect = QRectF(rect.x() + 24, rect.y() + 56, 120, 26)
             painter.setBrush(QBrush(QColor(13, 17, 26) if self.is_dark else QColor(255, 255, 255)))
             painter.setPen(QPen(QColor(56, 189, 248, 80), 1))
             painter.drawRoundedRect(date_rect, 4, 4)
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 8))
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 8))
             painter.setPen(QColor(56, 189, 248))
-            painter.drawText(date_rect, Qt.AlignmentFlag.AlignCenter, "📅 2026-09-03")
+            painter.drawText(date_rect, Qt.AlignmentFlag.AlignCenter, f"📅 {self.selected_date}")
+            self.clickable_regions.append({"id": "bar_date", "rect": date_rect, "action": "open_date"})
 
             today_rect = QRectF(rect.x() + 150, rect.y() + 56, 44, 26)
             painter.setBrush(QBrush(QColor(30, 41, 59) if self.is_dark else QColor(226, 232, 240)))
@@ -703,43 +839,53 @@ class GatewayFloatingWidget(QWidget):
             painter.drawRoundedRect(today_rect, 4, 4)
             painter.setPen(QColor(203, 213, 225) if self.is_dark else QColor(51, 65, 85))
             painter.drawText(today_rect, Qt.AlignmentFlag.AlignCenter, "今天")
+            self.clickable_regions.append({"id": "bar_today", "rect": today_rect, "action": "reset_today"})
 
-            # 冲刺文本
-            sprint_rect = QRectF(rect.x() + 204, rect.y() + 52, rect.width() - 300, 34)
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 9, QFont.Weight.Bold))
+            # 会话级联筛选标签
+            start_x = rect.x() + 204
+            if self.session_filter_id:
+                filter_tag_rect = QRectF(start_x, rect.y() + 56, 150, 26)
+                painter.setBrush(QBrush(QColor(12, 74, 110, 140)))
+                painter.setPen(QPen(QColor(56, 189, 248), 1))
+                painter.drawRoundedRect(filter_tag_rect, 4, 4)
+                painter.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
+                painter.setPen(QColor(56, 189, 248))
+                painter.drawText(filter_tag_rect, Qt.AlignmentFlag.AlignCenter, f"🏷️ 会话: {self.session_filter_id} ✕")
+                self.clickable_regions.append({"id": "bar_clear_filter", "rect": filter_tag_rect, "action": "clear_session_filter"})
+                start_x += 158
+
+            sprint_rect = QRectF(start_x, rect.y() + 52, rect.width() - start_x - 100, 34)
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 8, QFont.Weight.Bold))
             painter.setPen(QColor(52, 211, 153) if self.is_dark else QColor(5, 150, 105))
             painter.drawText(sprint_rect, Qt.AlignmentFlag.AlignVCenter, f"☑ {self.sprint_title}")
 
-            # 列筛选
             filter_rect = QRectF(rect.right() - 95, rect.y() + 56, 75, 26)
             painter.setBrush(QBrush(QColor(30, 41, 59) if self.is_dark else QColor(226, 232, 240)))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(filter_rect, 4, 4)
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 8))
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 8))
             painter.setPen(QColor(148, 163, 184) if self.is_dark else QColor(71, 85, 105))
             painter.drawText(filter_rect, Qt.AlignmentFlag.AlignCenter, "⚙ 列筛选")
+            self.clickable_regions.append({"id": "bar_col_filter", "rect": filter_rect, "action": "open_filter"})
 
-            # (3) 第三行: Tab 栏 (任务列表 (5) / 会话列表 (3))
+            # (3) 第三行: Tab 栏 (任务列表 / 会话列表)
             tab_y = rect.y() + 94
-            
-            # 任务列表 Tab
-            tab_task_rect = QRectF(rect.x() + 16, tab_y, 110, 32)
             is_task_tab = (self.active_tab == "tasks")
+
+            tab_task_rect = QRectF(rect.x() + 16, tab_y, 110, 32)
             if is_task_tab:
                 painter.setBrush(QBrush(QColor(12, 74, 110, 120) if self.is_dark else QColor(224, 242, 254)))
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawRoundedRect(tab_task_rect, 6, 6)
-                # 下边蓝条
                 painter.setPen(QPen(QColor(56, 189, 248), 2))
                 painter.drawLine(int(tab_task_rect.left() + 10), int(tab_task_rect.bottom() - 1), int(tab_task_rect.right() - 10), int(tab_task_rect.bottom() - 1))
                 painter.setPen(QColor(56, 189, 248) if self.is_dark else QColor(2, 132, 199))
             else:
                 painter.setPen(QColor(148, 163, 184) if self.is_dark else QColor(100, 116, 139))
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 9, QFont.Weight.Bold if is_task_tab else QFont.Weight.Normal))
-            painter.drawText(tab_task_rect, Qt.AlignmentFlag.AlignCenter, f"任务列表 ({len(self.tasks)})")
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 9, QFont.Weight.Bold if is_task_tab else QFont.Weight.Normal))
+            painter.drawText(tab_task_rect, Qt.AlignmentFlag.AlignCenter, f"任务列表 ({len(self.filtered_tasks)})")
             self.clickable_regions.append({"id": "tab_tasks", "rect": tab_task_rect, "action": "select_tab", "data": "tasks"})
 
-            # 会话列表 Tab
             tab_sess_rect = QRectF(rect.x() + 134, tab_y, 110, 32)
             if not is_task_tab:
                 painter.setBrush(QBrush(QColor(12, 74, 110, 120) if self.is_dark else QColor(224, 242, 254)))
@@ -750,42 +896,68 @@ class GatewayFloatingWidget(QWidget):
                 painter.setPen(QColor(56, 189, 248) if self.is_dark else QColor(2, 132, 199))
             else:
                 painter.setPen(QColor(148, 163, 184) if self.is_dark else QColor(100, 116, 139))
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 9, QFont.Weight.Bold if not is_task_tab else QFont.Weight.Normal))
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 9, QFont.Weight.Bold if not is_task_tab else QFont.Weight.Normal))
             painter.drawText(tab_sess_rect, Qt.AlignmentFlag.AlignCenter, f"会话列表 ({len(self.sessions)})")
             self.clickable_regions.append({"id": "tab_sessions", "rect": tab_sess_rect, "action": "select_tab", "data": "sessions"})
 
-            # 右侧提示说明
-            tips_rect = QRectF(rect.right() - 320, tab_y, 300, 32)
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 8))
+            tips_rect = QRectF(rect.right() - 340, tab_y, 320, 32)
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 8))
             painter.setPen(QColor(100, 116, 139))
-            tips_text = "单击行查看详情 · 点击 📌 锁定至悬浮窗" if is_task_tab else "展示活跃流式代理会话及实时连接耗时"
+            tips_text = "单击行查看详情 · 点击 📌 锁定至悬浮窗" if is_task_tab else "单击会话行可查看综合指标或联动筛选所属任务"
             painter.drawText(tips_rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, tips_text)
 
-            # (4) 表头
+            # (4) 表头与点击排序交互
             th_y = tab_y + 38
             painter.setPen(QColor(148, 163, 184) if self.is_dark else QColor(100, 116, 139))
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 8, QFont.Weight.Bold))
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 8, QFont.Weight.Bold))
+
             if is_task_tab:
+                # 📌
                 painter.drawText(QRectF(rect.x() + 20, th_y, 30, 20), Qt.AlignmentFlag.AlignCenter, "📌")
-                painter.drawText(QRectF(rect.x() + 55, th_y, 45, 20), Qt.AlignmentFlag.AlignCenter, "# ↑↓")
-                painter.drawText(QRectF(rect.x() + 105, th_y, 60, 20), Qt.AlignmentFlag.AlignCenter, "服务商")
-                painter.drawText(QRectF(rect.x() + 170, th_y, 65, 20), Qt.AlignmentFlag.AlignCenter, "请求数 ↑↓")
-                painter.drawText(QRectF(rect.x() + 240, th_y, 70, 20), Qt.AlignmentFlag.AlignCenter, "总消耗 ↑↓")
-                painter.drawText(QRectF(rect.x() + 315, th_y, 65, 20), Qt.AlignmentFlag.AlignCenter, "命中率 ↑↓")
-                painter.drawText(QRectF(rect.x() + 385, th_y, 110, 20), Qt.AlignmentFlag.AlignLeft, "模型")
+                # # ↑↓
+                th_id_rect = QRectF(rect.x() + 55, th_y, 45, 20)
+                painter.drawText(th_id_rect, Qt.AlignmentFlag.AlignCenter, "# ↑↓")
+                self.clickable_regions.append({"id": "th_id", "rect": th_id_rect, "action": "sort_col", "data": "id"})
+                # 服务商
+                th_prov_rect = QRectF(rect.x() + 105, th_y, 60, 20)
+                painter.drawText(th_prov_rect, Qt.AlignmentFlag.AlignCenter, "服务商")
+                self.clickable_regions.append({"id": "th_prov", "rect": th_prov_rect, "action": "sort_col", "data": "provider"})
+                # 请求数 ↑↓
+                th_req_rect = QRectF(rect.x() + 170, th_y, 65, 20)
+                painter.drawText(th_req_rect, Qt.AlignmentFlag.AlignCenter, "请求数 ↑↓")
+                self.clickable_regions.append({"id": "th_req", "rect": th_req_rect, "action": "sort_col", "data": "req"})
+                # 总消耗 ↑↓
+                th_tok_rect = QRectF(rect.x() + 240, th_y, 70, 20)
+                painter.drawText(th_tok_rect, Qt.AlignmentFlag.AlignCenter, "总消耗 ↑↓")
+                self.clickable_regions.append({"id": "th_tok", "rect": th_tok_rect, "action": "sort_col", "data": "tokens"})
+                # 命中率 ↑↓
+                th_hit_rect = QRectF(rect.x() + 315, th_y, 65, 20)
+                painter.drawText(th_hit_rect, Qt.AlignmentFlag.AlignCenter, "命中率 ↑↓")
+                self.clickable_regions.append({"id": "th_hit", "rect": th_hit_rect, "action": "sort_col", "data": "hit"})
+                # 模型
+                th_mod_rect = QRectF(rect.x() + 385, th_y, 110, 20)
+                painter.drawText(th_mod_rect, Qt.AlignmentFlag.AlignLeft, "模型")
+                self.clickable_regions.append({"id": "th_mod", "rect": th_mod_rect, "action": "sort_col", "data": "model"})
+                # 任务标题
                 painter.drawText(QRectF(rect.x() + 500, th_y, 240, 20), Qt.AlignmentFlag.AlignLeft, "任务标题")
             else:
                 painter.drawText(QRectF(rect.x() + 24, th_y, 70, 20), Qt.AlignmentFlag.AlignLeft, "会话ID")
                 painter.drawText(QRectF(rect.x() + 110, th_y, 60, 20), Qt.AlignmentFlag.AlignCenter, "服务商")
                 painter.drawText(QRectF(rect.x() + 180, th_y, 120, 20), Qt.AlignmentFlag.AlignLeft, "模型")
-                painter.drawText(QRectF(rect.x() + 310, th_y, 65, 20), Qt.AlignmentFlag.AlignCenter, "请求数")
-                painter.drawText(QRectF(rect.x() + 385, th_y, 75, 20), Qt.AlignmentFlag.AlignCenter, "消耗Token")
-                painter.drawText(QRectF(rect.x() + 470, th_y, 65, 20), Qt.AlignmentFlag.AlignCenter, "命中率")
+                th_s_req = QRectF(rect.x() + 310, th_y, 65, 20)
+                painter.drawText(th_s_req, Qt.AlignmentFlag.AlignCenter, "请求数 ↑↓")
+                self.clickable_regions.append({"id": "th_s_req", "rect": th_s_req, "action": "sort_col", "data": "req"})
+                th_s_tok = QRectF(rect.x() + 385, th_y, 75, 20)
+                painter.drawText(th_s_tok, Qt.AlignmentFlag.AlignCenter, "消耗Token ↑↓")
+                self.clickable_regions.append({"id": "th_s_tok", "rect": th_s_tok, "action": "sort_col", "data": "tokens"})
+                th_s_hit = QRectF(rect.x() + 470, th_y, 65, 20)
+                painter.drawText(th_s_hit, Qt.AlignmentFlag.AlignCenter, "命中率 ↑↓")
+                self.clickable_regions.append({"id": "th_s_hit", "rect": th_s_hit, "action": "sort_col", "data": "hit"})
                 painter.drawText(QRectF(rect.x() + 550, th_y, 200, 20), Qt.AlignmentFlag.AlignLeft, "会话描述 / 最后活跃")
 
             # (5) 表格数据行
             row_y = th_y + 24
-            items_to_render = self.tasks if is_task_tab else self.sessions
+            items_to_render = self.filtered_tasks if is_task_tab else self.sessions
             for idx, item in enumerate(items_to_render):
                 row_rect = QRectF(rect.x() + 16, row_y, rect.width() - 32, 40)
                 is_selected = (idx == self.current_task_idx) if is_task_tab else False
@@ -802,7 +974,6 @@ class GatewayFloatingWidget(QWidget):
                 painter.drawRoundedRect(row_rect, 4, 4)
 
                 if is_task_tab:
-                    # 注册行点击切换任务
                     self.clickable_regions.append({"id": f"row_{idx}", "rect": row_rect, "action": "select_task", "data": idx})
 
                     # 钉住按钮
@@ -817,7 +988,7 @@ class GatewayFloatingWidget(QWidget):
                     painter.setPen(QColor(148, 163, 184))
                     painter.drawText(QRectF(rect.x() + 55, row_y, 45, 40), Qt.AlignmentFlag.AlignCenter, f"#{item['id']}")
 
-                    # 服务商彩色徽标
+                    # 服务商徽标
                     prov_box = QRectF(rect.x() + 115, row_y + 8, 36, 24)
                     p_code = item["provider"]
                     if p_code == "openai":
@@ -858,14 +1029,14 @@ class GatewayFloatingWidget(QWidget):
                     painter.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
                     painter.drawText(req_badge, Qt.AlignmentFlag.AlignCenter, f"✓ {item['req']}")
 
-                    # 总消耗 (蓝)
+                    # 总消耗
                     painter.setPen(QColor(56, 189, 248))
                     painter.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
                     painter.drawText(QRectF(rect.x() + 240, row_y, 70, 40), Qt.AlignmentFlag.AlignCenter, f"{item['tokens']} tok")
 
-                    # 命中率 (绿)
+                    # 命中率
                     painter.setPen(QColor(52, 211, 153))
-                    painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 8, QFont.Weight.Bold))
+                    painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 8, QFont.Weight.Bold))
                     painter.drawText(QRectF(rect.x() + 315, row_y, 65, 40), Qt.AlignmentFlag.AlignCenter, f"⚡{item['hit']:.1f}%")
 
                     # 模型
@@ -874,16 +1045,16 @@ class GatewayFloatingWidget(QWidget):
                     painter.drawText(QRectF(rect.x() + 385, row_y, 110, 40), Qt.AlignmentFlag.AlignVCenter, item["model"])
 
                     # 任务标题
-                    painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 9, QFont.Weight.Bold))
+                    painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 9, QFont.Weight.Bold))
                     painter.setPen(QColor(241, 245, 249) if self.is_dark else QColor(15, 23, 42))
                     painter.drawText(QRectF(rect.x() + 500, row_y, 240, 40), Qt.AlignmentFlag.AlignVCenter, item["name"])
                 else:
-                    # 渲染会话行
+                    self.clickable_regions.append({"id": f"sess_row_{idx}", "rect": row_rect, "action": "select_session", "data": idx})
+
                     painter.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
                     painter.setPen(QColor(56, 189, 248))
                     painter.drawText(QRectF(rect.x() + 24, row_y, 80, 40), Qt.AlignmentFlag.AlignVCenter, item["id"])
 
-                    # 服务商
                     prov_box = QRectF(rect.x() + 115, row_y + 8, 36, 24)
                     painter.setBrush(QBrush(QColor(30, 41, 59, 160)))
                     painter.setPen(QPen(QColor(148, 163, 184), 1))
@@ -906,23 +1077,22 @@ class GatewayFloatingWidget(QWidget):
                     painter.setPen(QColor(52, 211, 153))
                     painter.drawText(QRectF(rect.x() + 470, row_y, 65, 40), Qt.AlignmentFlag.AlignCenter, f"⚡{item['hit']:.1f}%")
 
-                    painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 9))
+                    painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 9))
                     painter.setPen(QColor(241, 245, 249))
                     painter.drawText(QRectF(rect.x() + 550, row_y, 200, 40), Qt.AlignmentFlag.AlignVCenter, f"{item['name']} ({item['time']})")
 
                 row_y += 44
 
-            # (5) 底部状态栏与接入地址
+            # (6) 底部状态栏
             footer_y = rect.bottom() - 40
             painter.setBrush(QBrush(QColor(18, 24, 38) if self.is_dark else QColor(248, 250, 252)))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawRoundedRect(QRectF(rect.x(), footer_y, rect.width(), 40), 14, 14)
 
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 8))
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 8))
             painter.setPen(QColor(148, 163, 184) if self.is_dark else QColor(100, 116, 139))
             painter.drawText(QRectF(rect.x() + 20, footer_y, 40, 40), Qt.AlignmentFlag.AlignVCenter, "接入:")
 
-            # 绿色接入 URL 药丸 (支持点击复制)
             url_rect = QRectF(rect.x() + 60, footer_y + 8, 210, 24)
             painter.setBrush(QBrush(QColor(6, 78, 59, 160) if self.is_dark else QColor(236, 253, 245)))
             painter.setPen(QPen(QColor(52, 211, 153, 100), 1))
@@ -934,10 +1104,9 @@ class GatewayFloatingWidget(QWidget):
             self.clickable_regions.append({"id": "panel_copy", "rect": url_rect, "action": "copy_url"})
 
             painter.setPen(QColor(100, 116, 139))
-            painter.setFont(QFont("PingFang SC" if platform.system() == "Darwin" else "Microsoft YaHei", 8))
+            painter.setFont(QFont("PingFang SC" if is_mac else "Microsoft YaHei", 8))
             painter.drawText(QRectF(rect.x() + 285, footer_y, 260, 40), Qt.AlignmentFlag.AlignVCenter, "· 支持按键滑动 W/A/S/D ↑↓←→")
 
-            # 打开 Web 控制台按钮
             web_btn = QRectF(rect.right() - 220, footer_y + 8, 80, 24)
             painter.setBrush(QBrush(QColor(30, 41, 59) if self.is_dark else QColor(241, 245, 249)))
             painter.setPen(QPen(QColor(56, 189, 248, 80), 1))
@@ -947,4 +1116,5 @@ class GatewayFloatingWidget(QWidget):
             self.clickable_regions.append({"id": "panel_web", "rect": web_btn, "action": "open_web"})
 
             painter.setPen(QColor(148, 163, 184))
-            painter.drawText(QRectF(rect.right() - 130, footer_y, 110, 40), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, f"共 {len(self.tasks)} 条  < 1 / 1 >")
+            cnt_text = f"共 {len(self.filtered_tasks)} 条  < 1 / 1 >" if is_task_tab else f"共 {len(self.sessions)} 会话"
+            painter.drawText(QRectF(rect.right() - 130, footer_y, 110, 40), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, cnt_text)

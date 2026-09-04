@@ -3,6 +3,10 @@ name: Build Desktop Releases
 permissions:
   contents: write
 
+defaults:
+  run:
+    shell: bash
+
 on:
   push:
     tags:

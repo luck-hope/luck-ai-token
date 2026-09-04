@@ -55,4 +55,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 自愈式上传：release 不存在则先创建（避免删 tag 重建后 release 变 untagged 导致 not found）
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || gh release create "${GITHUB_REF_NAME}" --generate-notes
           gh release upload "${GITHUB_REF_NAME}" "${{ matrix.output_path }}" --clobber

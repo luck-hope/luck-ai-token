@@ -1,5 +1,8 @@
 name: Build Desktop Releases
 
+permissions:
+  contents: write
+
 on:
   push:
     tags:
@@ -47,3 +50,9 @@ jobs:
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.output_path }}
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" "${{ matrix.output_path }}" --clobber

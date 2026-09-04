@@ -65,8 +65,15 @@ class GatewayAppServer:
             "version": 1,
             "disable_existing_loggers": False,
             "formatters": {
-                "safe": {
+                # uvicorn 0.52+ configure_logging 会无条件访问 formatters["default"] / ["access"]
+                # 键名必须是 default / access，否则 KeyError: 'default'
+                "default": {
                     "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                    "use_colors": False,
+                },
+                "access": {
+                    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+                    "use_colors": False,
                 },
             },
             "handlers": {

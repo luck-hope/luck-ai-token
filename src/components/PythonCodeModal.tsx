@@ -44,6 +44,27 @@ UsageGateway - 跨平台 AI 网关与实时桌面悬浮胶囊监控
 
 import sys
 import os
+import io
+import logging
+
+# 修复 Windows / macOS 下 PyInstaller --noconsole 打包时 sys.stdout/stderr 为 None 导致的 isatty 崩溃
+class SafeStream(io.StringIO):
+    def write(self, s):
+        pass
+    def flush(self):
+        pass
+    def isatty(self):
+        return False
+    def fileno(self):
+        raise io.UnsupportedOperation("fileno not supported")
+
+if sys.stdout is None:
+    sys.stdout = SafeStream()
+if sys.stderr is None:
+    sys.stderr = SafeStream()
+if sys.stdin is None:
+    sys.stdin = SafeStream()
+
 import signal
 import threading
 import uvicorn
@@ -68,12 +89,30 @@ class GatewayAppServer:
         self.thread = None
 
     def start(self):
+        log_config = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "safe": {"format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"},
+            },
+            "handlers": {
+                "null": {"class": "logging.NullHandler"},
+            },
+            "loggers": {
+                "uvicorn": {"handlers": ["null"], "level": "WARNING", "propagate": False},
+                "uvicorn.error": {"handlers": ["null"], "level": "WARNING", "propagate": False},
+                "uvicorn.access": {"handlers": ["null"], "level": "WARNING", "propagate": False},
+            },
+        }
+
         config = uvicorn.Config(
             gateway_app,
             host=self.host,
             port=self.port,
             log_level="warning",
-            loop="asyncio"
+            loop="asyncio",
+            use_colors=False,
+            log_config=log_config,
         )
         self.server = uvicorn.Server(config)
         self.thread = threading.Thread(target=self.server.run, daemon=True)

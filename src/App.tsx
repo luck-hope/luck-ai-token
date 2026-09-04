@@ -452,6 +452,7 @@ export default function App() {
         onPrevTask={handlePrevTask}
         onNextTask={handleNextTask}
         onUnlockTracking={() => setTrackingTarget({ type: 'turn', id: '', isAuto: true })}
+        onTriggerTurn={handleSimulateRequest}
       />
 
       {/* Bottom helper tip */}

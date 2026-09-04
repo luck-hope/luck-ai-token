@@ -27,6 +27,7 @@ interface FloatingWidgetProps {
   onPrevTask?: () => void;
   onNextTask?: () => void;
   onUnlockTracking?: () => void;
+  onTriggerTurn?: () => void;
 }
 
 export const FloatingWidget: React.FC<FloatingWidgetProps> = ({
@@ -52,6 +53,7 @@ export const FloatingWidget: React.FC<FloatingWidgetProps> = ({
   onPrevTask,
   onNextTask,
   onUnlockTracking,
+  onTriggerTurn,
 }) => {
   // Widget position (x, y)
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 200, y: 70 });
@@ -257,6 +259,8 @@ export const FloatingWidget: React.FC<FloatingWidgetProps> = ({
             onSetTrackingTarget={onSetTrackingTarget}
             customWidth={panelSize.w}
             customHeight={panelSize.h}
+            onTriggerTurn={onTriggerTurn}
+            isStreaming={isStreaming}
           />
 
           {/* ── 底部上下拉伸控制器 (纯隐形响应区域，移除任何突兀的蓝色背景或高亮) ── */}

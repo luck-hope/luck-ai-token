@@ -45,6 +45,8 @@ interface FullGatewayPanelProps {
   onSetTrackingTarget?: (target: TrackingTarget) => void;
   customWidth?: number;
   customHeight?: number;
+  onTriggerTurn?: () => void;
+  isStreaming?: boolean;
 }
 
 type SortField = 'none' | 'id' | 'tokens' | 'hitRate' | 'requests';
@@ -70,6 +72,8 @@ export const FullGatewayPanel: React.FC<FullGatewayPanelProps> = ({
   onSetTrackingTarget,
   customWidth = 580,
   customHeight = 490,
+  onTriggerTurn,
+  isStreaming = false,
 }) => {
   const isDark = theme === 'dark';
   const [activeTab, setActiveTab] = useState<'task' | 'session'>('task');

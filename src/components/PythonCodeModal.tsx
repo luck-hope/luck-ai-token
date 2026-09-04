@@ -89,30 +89,15 @@ class GatewayAppServer:
         self.thread = None
 
     def start(self):
-        log_config = {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "formatters": {
-                "safe": {"format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"},
-            },
-            "handlers": {
-                "null": {"class": "logging.NullHandler"},
-            },
-            "loggers": {
-                "uvicorn": {"handlers": ["null"], "level": "WARNING", "propagate": False},
-                "uvicorn.error": {"handlers": ["null"], "level": "WARNING", "propagate": False},
-                "uvicorn.access": {"handlers": ["null"], "level": "WARNING", "propagate": False},
-            },
-        }
-
+        # 设置 log_config=None，告知 uvicorn 不接管或重新配置全局日志，
+        # 彻底规避 Windows/GUI 打包环境下的 isatty 崩溃与 KeyError: 'default'
         config = uvicorn.Config(
             gateway_app,
             host=self.host,
             port=self.port,
             log_level="warning",
             loop="asyncio",
-            use_colors=False,
-            log_config=log_config,
+            log_config=None,
         )
         self.server = uvicorn.Server(config)
         self.thread = threading.Thread(target=self.server.run, daemon=True)

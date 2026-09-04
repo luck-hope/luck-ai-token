@@ -9,6 +9,7 @@ import platform
 
 def build():
     print("=== 开始执行 PyInstaller 独立打包 ===")
+    sep = ";" if platform.system() == "Windows" else ":"
     
     cmd = [
         sys.executable,
@@ -18,7 +19,10 @@ def build():
         "--onedir" if platform.system() == "Darwin" else "--onefile",
         "--windowed",
         "--name", "TokenTrackerGateway",
-        "--add-data", "config.py:.",
+        "--hidden-import", "ui.settings_dialog",
+        "--hidden-import", "ui.widget",
+        "--hidden-import", "gateway.proxy",
+        "--hidden-import", "config",
         "main.py"
     ]
     

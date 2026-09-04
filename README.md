@@ -6,6 +6,18 @@
 
 ---
 
+## 📥 下载安装包 (Release)
+
+> 不想折腾环境？直接从 **Release** 下载开箱即用的桌面程序：
+
+- **Windows x64**：`TokenTrackerGateway-Windows-x64.exe`（单文件，双击运行）
+- **macOS**：`TokenTrackerGateway-macOS.zip`（解压后拖入 Applications）
+- **源码**：本仓库 `main` 分支（Web 版 + 桌面版源码）
+
+👉 **[前往 Release 下载页面](https://github.com/luck-hope/luck-ai-token/releases)**
+
+---
+
 ## ✨ 核心特性
 
 - 🖥️ **桌面原生置顶悬浮窗 (打开即用 · PySide6 / Qt)**：

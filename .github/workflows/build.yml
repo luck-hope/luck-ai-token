@@ -23,8 +23,10 @@ jobs:
         include:
           - os: windows-latest
             artifact_name: TokenTrackerGateway-Windows-x64.exe
-            run_cmd: pyinstaller --noconsole --onefile --name "TokenTrackerGateway" main.py
-            output_path: dist/TokenTrackerGateway.exe
+            run_cmd: |
+              pyinstaller --noconsole --onefile --name "TokenTrackerGateway" main.py
+              cp dist/TokenTrackerGateway.exe dist/TokenTrackerGateway-Windows-x64.exe
+            output_path: dist/TokenTrackerGateway-Windows-x64.exe
           - os: macos-latest
             artifact_name: TokenTrackerGateway-macOS.zip
             run_cmd: |
